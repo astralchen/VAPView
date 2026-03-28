@@ -42,6 +42,10 @@ public final class VAPDiskCache: VAPResourceLoader {
         guard filePath.hasPrefix("http://") || filePath.hasPrefix("https://") else {
             return filePath
         }
+        // [H4] 拒绝明文 HTTP，防止中间人攻击替换 MP4 载荷
+        guard filePath.hasPrefix("https://") else {
+            throw VAPError.unsupportedURLScheme(filePath)
+        }
         guard let url = URL(string: filePath) else {
             throw VAPError.fileNotFound(filePath)
         }
@@ -71,16 +75,20 @@ public final class VAPDiskCache: VAPResourceLoader {
     private func download(url: URL,
                           dest: URL,
                           onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
-        if let existing = await inflightActor.task(for: dest.path) {
-            return try await existing.value
-        }
         let mgr = sessionManager
-        let task: Task<String, Error> = Task {
-            try await mgr.download(url: url, dest: dest, onProgress: onProgress)
+        // [BUG-D2/D3] 原子 getOrCreate：检查与注册在同一 actor 调用内完成，消除 TOCTOU 竞争；
+        // isOwner 标记由创建方负责清理，避免 defer+非结构化 Task 导致的误删新任务。
+        let (task, isOwner) = await inflightActor.getOrCreate(for: dest.path) {
+            Task { try await mgr.download(url: url, dest: dest, onProgress: onProgress) }
         }
-        await inflightActor.register(task: task, for: dest.path)
-        defer { Task { await self.inflightActor.remove(for: dest.path) } }
-        return try await task.value
+        do {
+            let result = try await task.value
+            if isOwner { await inflightActor.remove(for: dest.path) }
+            return result
+        } catch {
+            if isOwner { await inflightActor.remove(for: dest.path) }
+            throw error
+        }
     }
 }
 
@@ -88,8 +96,20 @@ public final class VAPDiskCache: VAPResourceLoader {
 
 private actor InflightActor {
     private var tasks: [String: Task<String, Error>] = [:]
-    func task(for key: String) -> Task<String, Error>? { tasks[key] }
-    func register(task: Task<String, Error>, for key: String) { tasks[key] = task }
+
+    /// 原子 getOrCreate：若已有 inflight 任务则返回 (existing, isOwner=false)；
+    /// 否则调用 make() 创建新任务，注册后返回 (new, isOwner=true)。
+    /// isOwner == true 的调用方负责在任务结束后调用 remove(for:)。
+    func getOrCreate(for key: String,
+                     make: () -> Task<String, Error>) -> (Task<String, Error>, Bool) {
+        if let existing = tasks[key] {
+            return (existing, false)
+        }
+        let task = make()
+        tasks[key] = task
+        return (task, true)
+    }
+
     func remove(for key: String) { tasks.removeValue(forKey: key) }
 }
 
@@ -132,8 +152,9 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession,
                     downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
+        // [M1] 先移除 handler 再 resume，防止 didCompleteWithError 对同一 continuation 二次 resume
         lock.lock()
-        let handler = handlers[downloadTask.taskIdentifier]
+        let handler = handlers.removeValue(forKey: downloadTask.taskIdentifier)
         lock.unlock()
         guard let handler else { return }
         do {
@@ -147,9 +168,6 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
         } catch {
             handler.continuation.resume(throwing: error)
         }
-        lock.lock()
-        handlers.removeValue(forKey: downloadTask.taskIdentifier)
-        lock.unlock()
     }
 
     func urlSession(_ session: URLSession,
@@ -170,11 +188,14 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        guard let error else { return }
+        // [BUG-D4] 无论成功与否均摘除 handler，保持与 didFinishDownloadingTo 路径一致。
+        // 成功完成时 didFinishDownloadingTo 已通过 resume(returning:) 结束 continuation，
+        // 此处 handler 为 nil，removeValue 是空操作，无副作用。
         lock.lock()
-        let handler = handlers[task.taskIdentifier]
-        handlers.removeValue(forKey: task.taskIdentifier)
+        let handler = handlers.removeValue(forKey: task.taskIdentifier)
         lock.unlock()
-        handler?.continuation.resume(throwing: error)
+        if let error {
+            handler?.continuation.resume(throwing: error)
+        }
     }
 }

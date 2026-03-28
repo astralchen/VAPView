@@ -40,9 +40,7 @@ final class VAPConfigManager {
                 let context = VAPImageContext(
                     srcId: srcInfo.srcId,
                     fitType: srcInfo.attachmentFitType,
-                    targetSize: (srcInfo.w != nil && srcInfo.h != nil)
-                        ? CGSize(width: srcInfo.w!, height: srcInfo.h!)
-                        : nil,
+                    targetSize: srcInfo.w.flatMap { w in srcInfo.h.map { h in CGSize(width: w, height: h) } },
                     loadType: srcInfo.attachmentLoadType)
                 switch sources[srcInfo.srcId] {
                 case .image(let img):
@@ -50,11 +48,18 @@ final class VAPConfigManager {
                         textures[srcInfo.srcId] = tex
                     }
                 case .url(let urlString):
-                    if let url = URL(string: urlString), let loader = imageLoader {
-                        let image = try await loader(url, context)
-                        if let tex = makeTexture(from: image) {
-                            textures[srcInfo.srcId] = tex
-                        }
+                    // [M4] 只允许 https/http/file scheme，防止 SSRF 类攻击
+                    guard let url = URL(string: urlString),
+                          ["https", "http", "file"].contains(url.scheme?.lowercased() ?? "") else {
+                        break
+                    }
+                    // [BUG-C2] imageLoader 为 nil 时明确报错，避免纹理缺失却无任何提示
+                    guard let loader = imageLoader else {
+                        throw VAPError.unknown("imageLoader is required for .url attachment (srcId: \(srcInfo.srcId))")
+                    }
+                    let image = try await loader(url, context)
+                    if let tex = makeTexture(from: image) {
+                        textures[srcInfo.srcId] = tex
                     }
                 case .text, nil:
                     break
@@ -69,8 +74,9 @@ final class VAPConfigManager {
                 let size = CGSize(width: srcInfo.w ?? 100, height: srcInfo.h ?? 40)
                 let color = parseHexColor(srcInfo.txtColor) ?? .white
                 let fontSize = srcInfo.txtFontSize ?? 14
-                let image = renderTextImage(text: text, size: size,
-                                            color: color, fontSize: fontSize)
+                let image = await MainActor.run {
+                    Self.renderTextImage(text: text, size: size, color: color, fontSize: fontSize)
+                }
                 if let tex = makeTexture(from: image) {
                     textures[srcInfo.srcId] = tex
                 }
@@ -110,8 +116,9 @@ final class VAPConfigManager {
 
     // MARK: - Text rendering
 
-    private func renderTextImage(text: String, size: CGSize,
-                                  color: UIColor, fontSize: CGFloat) -> UIImage {
+    @MainActor
+    private static func renderTextImage(text: String, size: CGSize,
+                                         color: UIColor, fontSize: CGFloat) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
         return renderer.image { ctx in
             let attrs: [NSAttributedString.Key: Any] = [

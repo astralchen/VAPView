@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		332D765E2F7811B8003B9D8F /* VAPPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 332D765D2F7811B8003B9D8F /* VAPPlayer */; };
 		339CA2D82F7767030064AAEB /* VAPPlayer in Frameworks */ = {isa = PBXBuildFile; productRef = 339CA2D72F7767030064AAEB /* VAPPlayer */; };
 		AA000001000000000000001 /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000011000000000000001 /* AppDelegate.swift */; };
 		AA000002000000000000001 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000012000000000000001 /* SceneDelegate.swift */; };
@@ -28,6 +29,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				339CA2D82F7767030064AAEB /* VAPPlayer in Frameworks */,
+				332D765E2F7811B8003B9D8F /* VAPPlayer in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -88,6 +90,7 @@
 			name = VAPDemo;
 			packageProductDependencies = (
 				339CA2D72F7767030064AAEB /* VAPPlayer */,
+				332D765D2F7811B8003B9D8F /* VAPPlayer */,
 			);
 			productName = VAPDemo;
 			productReference = AA000010000000000000001 /* VAPDemo.app */;
@@ -118,7 +121,7 @@
 			);
 			mainGroup = AA000033000000000000001;
 			packageReferences = (
-				339CA2D62F7767030064AAEB /* XCLocalSwiftPackageReference "../../VAPPlayerSPM" */,
+				332D765C2F7811B8003B9D8F /* XCLocalSwiftPackageReference "../../VAPPlayerSwift" */,
 			);
 			productRefGroup = AA000031000000000000001 /* Products */;
 			projectDirPath = "";
@@ -272,13 +275,17 @@
 /* End XCConfigurationList section */
 
 /* Begin XCLocalSwiftPackageReference section */
-		339CA2D62F7767030064AAEB /* XCLocalSwiftPackageReference "../../VAPPlayerSPM" */ = {
+		332D765C2F7811B8003B9D8F /* XCLocalSwiftPackageReference "../../VAPPlayerSwift" */ = {
 			isa = XCLocalSwiftPackageReference;
-			relativePath = ../../VAPPlayerSPM;
+			relativePath = ../../VAPPlayerSwift;
 		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
+		332D765D2F7811B8003B9D8F /* VAPPlayer */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = VAPPlayer;
+		};
 		339CA2D72F7767030064AAEB /* VAPPlayer */ = {
 			isa = XCSwiftPackageProductDependency;
 			productName = VAPPlayer;

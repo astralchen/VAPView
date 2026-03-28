@@ -59,6 +59,8 @@ public enum VAPAttachmentFitType: String, Sendable {
 // MARK: - Error codes
 public enum VAPError: Error, Sendable {
     case fileNotFound(String)
+    /// URL scheme 不被允许（例如拒绝明文 http://）
+    case unsupportedURLScheme(String)
     case invalidMP4File
     case cannotGetStreamInfo
     case cannotGetStream

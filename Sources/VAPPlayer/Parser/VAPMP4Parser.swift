@@ -33,6 +33,12 @@ struct VAPMP4Info: Sendable {
 
 struct VAPMP4Parser {
 
+    // MARK: - 安全限制常量
+    private static let kMaxBoxDepth    = 16          // 防止无限递归
+    private static let kMaxBoxReadSize: UInt64 = 64 * 1_024 * 1_024  // 64 MB，防止巨型 box 分配
+    private static let kMaxSampleCount = 100_000     // 防止无界 sampleOffsets 分配
+    private static let kMaxTableEntries = 100_000    // stts/ctts/stsc/stco/stsz/stss 条目上限
+
     static func parse(filePath: String) throws -> VAPMP4Info {
         guard FileManager.default.fileExists(atPath: filePath) else {
             throw VAPError.fileNotFound(filePath)
@@ -83,7 +89,10 @@ struct VAPMP4Parser {
 
     // MARK: - Box tree parsing
 
-    private static func parseBoxes(handle: FileHandle, offset: UInt64, length: UInt64?) throws -> [VAPMP4Box] {
+    private static func parseBoxes(handle: FileHandle, offset: UInt64, length: UInt64?,
+                                    depth: Int = 0) throws -> [VAPMP4Box] {
+        // [M2] 限制递归深度，防止畸形 MP4 触发栈溢出
+        guard depth < kMaxBoxDepth else { return [] }
         var boxes: [VAPMP4Box] = []
         var pos = offset
         let end: UInt64 = length.map { offset + $0 } ?? UInt64.max
@@ -105,21 +114,27 @@ struct VAPMP4Parser {
             if boxSize < headerSize { break }
             let bodySize = boxSize - headerSize
             let bodyOffset = pos + headerSize
-            let box = try parseBox(type: typeName, handle: handle, bodyOffset: bodyOffset, bodySize: bodySize)
+            let box = try parseBox(type: typeName, handle: handle, bodyOffset: bodyOffset,
+                                   bodySize: bodySize, depth: depth)
             boxes.append(box)
-            pos += boxSize
+            // [H1] 防止 pos += boxSize 整数溢出
+            let (newPos, overflow) = pos.addingReportingOverflow(boxSize)
+            if overflow { break }
+            pos = newPos
         }
         return boxes
     }
 
     private static func parseBox(type: String, handle: FileHandle,
-                                  bodyOffset: UInt64, bodySize: UInt64) throws -> VAPMP4Box {
+                                  bodyOffset: UInt64, bodySize: UInt64,
+                                  depth: Int = 0) throws -> VAPMP4Box {
         switch type {
         case "moov", "trak", "mdia", "minf", "stbl", "dinf", "edts", "udta":
-            let children = try parseBoxes(handle: handle, offset: bodyOffset, length: bodySize)
+            // [M2] 传递 depth+1 防止无限递归
+            let children = try parseBoxes(handle: handle, offset: bodyOffset, length: bodySize, depth: depth + 1)
             return VAPMP4Box(type: type, payload: .container, children: children)
         case "stsd":
-            let children = try parseBoxes(handle: handle, offset: bodyOffset + 8, length: bodySize > 8 ? bodySize - 8 : 0)
+            let children = try parseBoxes(handle: handle, offset: bodyOffset + 8, length: bodySize > 8 ? bodySize - 8 : 0, depth: depth + 1)
             return VAPMP4Box(type: type, payload: .container, children: children)
         case "avc1", "hvc1", "hev1", "mp4v":
             // VisualSampleEntry: width at body+24 (2 bytes BE), height at body+26 (2 bytes BE)
@@ -128,7 +143,7 @@ struct VAPMP4Parser {
             let vseData = (try? handle.read(upToCount: 28)) ?? Data()
             let w = vseData.count >= 26 ? Int(readU16BE(vseData, offset: 24)) : 0
             let h = vseData.count >= 28 ? Int(readU16BE(vseData, offset: 26)) : 0
-            let children = try parseBoxes(handle: handle, offset: bodyOffset + 78, length: bodySize > 78 ? bodySize - 78 : 0)
+            let children = try parseBoxes(handle: handle, offset: bodyOffset + 78, length: bodySize > 78 ? bodySize - 78 : 0, depth: depth + 1)
             return VAPMP4Box(type: type, payload: .visualEntry(width: w, height: h), children: children)
         case "mvhd": return try VAPMP4Box(type: type, payload: parseMvhd(handle: handle, offset: bodyOffset))
         case "mdhd": return try VAPMP4Box(type: type, payload: parseMdhd(handle: handle, offset: bodyOffset))
@@ -183,7 +198,9 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .stts(entries: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .stts(entries: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .stts(entries: []) }
+        guard let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .stts(entries: []) }
         let entries = (0..<count).map { VAPMP4Payload.SttsEntry(count: readU32BE(body, offset: $0*8), delta: readU32BE(body, offset: $0*8+4)) }
         return .stts(entries: entries)
     }
@@ -192,7 +209,9 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .ctts(entries: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .ctts(entries: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .ctts(entries: []) }
+        guard let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .ctts(entries: []) }
         let entries = (0..<count).map { VAPMP4Payload.CttsEntry(count: readU32BE(body, offset: $0*8), offset: Int32(bitPattern: readU32BE(body, offset: $0*8+4))) }
         return .ctts(entries: entries)
     }
@@ -201,7 +220,9 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .stsc(entries: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 12), body.count == count * 12 else { return .stsc(entries: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .stsc(entries: []) }
+        guard let body = try? handle.read(upToCount: count * 12), body.count == count * 12 else { return .stsc(entries: []) }
         let entries = (0..<count).map { VAPMP4Payload.StscEntry(firstChunk: readU32BE(body, offset: $0*12), samplesPerChunk: readU32BE(body, offset: $0*12+4), descIndex: readU32BE(body, offset: $0*12+8)) }
         return .stsc(entries: entries)
     }
@@ -210,7 +231,9 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .stco(offsets: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 4), body.count == count * 4 else { return .stco(offsets: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .stco(offsets: []) }
+        guard let body = try? handle.read(upToCount: count * 4), body.count == count * 4 else { return .stco(offsets: []) }
         return .stco(offsets: (0..<count).map { readU32BE(body, offset: $0*4) })
     }
 
@@ -218,7 +241,9 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .co64(offsets: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .co64(offsets: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .co64(offsets: []) }
+        guard let body = try? handle.read(upToCount: count * 8), body.count == count * 8 else { return .co64(offsets: []) }
         return .co64(offsets: (0..<count).map { readU64BE(body, offset: $0*8) })
     }
 
@@ -229,7 +254,9 @@ struct VAPMP4Parser {
         let defaultSize = readU32BE(hdr, offset: 4)   // skip version/flags at offset 0
         let sampleCount = Int(readU32BE(hdr, offset: 8))
         if defaultSize > 0 { return .stsz(defaultSize: defaultSize, sizes: []) }
-        guard sampleCount > 0, let body = try? handle.read(upToCount: sampleCount * 4), body.count == sampleCount * 4 else {
+        // [H3] 防止无界内存分配
+        guard sampleCount > 0, sampleCount <= kMaxTableEntries else { return .stsz(defaultSize: 0, sizes: []) }
+        guard let body = try? handle.read(upToCount: sampleCount * 4), body.count == sampleCount * 4 else {
             return .stsz(defaultSize: 0, sizes: [])
         }
         return .stsz(defaultSize: 0, sizes: (0..<sampleCount).map { readU32BE(body, offset: $0*4) })
@@ -239,13 +266,17 @@ struct VAPMP4Parser {
         try? handle.seek(toOffset: offset)
         guard let hdr = try? handle.read(upToCount: 8), hdr.count == 8 else { return .stss(sampleNumbers: []) }
         let count = Int(readU32BE(hdr, offset: 4))
-        guard count > 0, let body = try? handle.read(upToCount: count * 4), body.count == count * 4 else { return .stss(sampleNumbers: []) }
+        // [H3] 防止无界内存分配
+        guard count > 0, count <= kMaxTableEntries else { return .stss(sampleNumbers: []) }
+        guard let body = try? handle.read(upToCount: count * 4), body.count == count * 4 else { return .stss(sampleNumbers: []) }
         return .stss(sampleNumbers: (0..<count).map { readU32BE(body, offset: $0*4) })
     }
 
     private static func parseAvcC(handle: FileHandle, offset: UInt64, size: UInt64) -> VAPMP4Payload {
         try? handle.seek(toOffset: offset)
-        guard size >= 7, let data = try? handle.read(upToCount: Int(size)), data.count >= 7 else { return .avcC(VAPAvcCData()) }
+        // [H2] 防止 UInt64→Int 截断导致崩溃
+        guard size >= 7, size <= kMaxBoxReadSize else { return .avcC(VAPAvcCData()) }
+        guard let data = try? handle.read(upToCount: Int(size)), data.count >= 7 else { return .avcC(VAPAvcCData()) }
         var avcC = VAPAvcCData()
         let spsCount = Int(data[5] & 0x1F)
         var idx = 6
@@ -268,7 +299,9 @@ struct VAPMP4Parser {
 
     private static func parseHvcC(handle: FileHandle, offset: UInt64, size: UInt64) -> VAPMP4Payload {
         try? handle.seek(toOffset: offset)
-        guard size > 0, let data = try? handle.read(upToCount: Int(size)) else { return .hvcC(VAPHvcCData()) }
+        // [H2] 防止 UInt64→Int 截断导致崩溃
+        guard size > 0, size <= kMaxBoxReadSize else { return .hvcC(VAPHvcCData()) }
+        guard let data = try? handle.read(upToCount: Int(size)) else { return .hvcC(VAPHvcCData()) }
         var hvcC = VAPHvcCData(rawData: data)
         var idx = 22
         guard idx < data.count else { return .hvcC(hvcC) }
@@ -296,7 +329,9 @@ struct VAPMP4Parser {
 
     private static func parseVapc(handle: FileHandle, offset: UInt64, size: UInt64) -> VAPMP4Payload {
         try? handle.seek(toOffset: offset)
-        guard size > 0, let data = try? handle.read(upToCount: Int(size)) else { return .vapc(jsonData: Data()) }
+        // [H2] 防止 UInt64→Int 截断导致崩溃
+        guard size > 0, size <= kMaxBoxReadSize else { return .vapc(jsonData: Data()) }
+        guard let data = try? handle.read(upToCount: Int(size)) else { return .vapc(jsonData: Data()) }
         return .vapc(jsonData: data)
     }
 
@@ -383,6 +418,8 @@ struct VAPMP4Parser {
         }
 
         let sampleCount = sizes.isEmpty ? deltas.count : sizes.count
+        // [H3] 防止无界内存分配（恶意 stsz/stts 条目数）
+        guard sampleCount <= kMaxSampleCount else { throw VAPError.invalidMP4File }
         var sampleOffsets = [UInt64](repeating: 0, count: sampleCount)
         var sampleIdx = 0
         for chunkIdx in 0..<chunkOffsets.count {
