@@ -169,7 +169,8 @@ public final class VAPPlayer {
             let info: VAPMP4Info = try await Task.detached(priority: .userInitiated) {
                 try VAPMP4Parser.parse(filePath: config.filePath)
             }.value
-            playerLog.debug("parsed: frames=\(info.frameCount) fps=\(info.fps) hasAudio=\(info.hasAudioTrack) vapc=\(info.vapcJSON != nil)")
+            playerLog.debug("parsed: frames=\(info.frameCount) fps=\(info.fps) size=\(info.width)x\(info.height) hasAudio=\(info.hasAudioTrack) vapc=\(info.vapcJSON != nil)")
+            playerLog.debug("config: blendMode=\(config.blendMode.rawValue) contentMode=\(config.contentMode) loopCount=\(config.loopCount)")
 
             // 2. Validate VAP version
             if let jsonData = info.vapcJSON {

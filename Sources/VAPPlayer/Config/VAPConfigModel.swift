@@ -21,9 +21,26 @@ public struct VAPCommonInfo: Decodable, Sendable {
     public let videoH: Int
     public let orien: Int
     public let v: Int?  // vapc version field (JSON key "v")
+    /// RGB content region within the video frame: [x, y, w, h] in pixels.
+    public let rgbFrame: [CGFloat]?
+    /// Alpha content region within the video frame: [x, y, w, h] in pixels.
+    /// May be half-resolution compared to rgbFrame (space optimization).
+    public let aFrame: [CGFloat]?
 
     var orientation: VAPOrientation { VAPOrientation(rawValue: orien) ?? .none }
     var version: Int { v ?? 0 }
+
+    /// Returns the RGB rect within the video, or nil if rgbFrame is absent/invalid.
+    var rgbRect: CGRect? {
+        guard let f = rgbFrame, f.count == 4 else { return nil }
+        return CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
+    }
+
+    /// Returns the alpha rect within the video, or nil if aFrame is absent/invalid.
+    var alphaRect: CGRect? {
+        guard let f = aFrame, f.count == 4 else { return nil }
+        return CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
+    }
 }
 
 public struct VAPSourceInfo: Decodable, Sendable {

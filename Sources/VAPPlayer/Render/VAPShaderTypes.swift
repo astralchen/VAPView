@@ -8,6 +8,13 @@
 import simd
 import Foundation
 
+// MARK: - Vertex (VAP simple path — matches vap_vertexShader / VAPSimpleVertex in .metal)
+struct VAPSimpleVertex {
+    var position: SIMD4<Float>
+    var texCoord: SIMD2<Float>
+    var alphaTexCoord: SIMD2<Float>
+}
+
 // MARK: - Vertex (HWD alpha-split path)
 struct VAPHWDVertex {
     var position: SIMD4<Float>   // x, y, z, w

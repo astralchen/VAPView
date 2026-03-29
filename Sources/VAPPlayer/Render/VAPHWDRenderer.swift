@@ -169,20 +169,24 @@ final class VAPHWDRenderer {
     }
 
     private func updateColorParams(from pixelBuffer: CVPixelBuffer) {
-        let matrix = CVBufferGetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil).map { $0.takeUnretainedValue() as? String } ?? nil
-        let newParams: VAPColorParameters
-        if matrix == (kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String) {
-            newParams = .bt709Full
-        } else {
-            newParams = .bt601Full
+        let matrix = CVBufferGetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil)?
+            .takeUnretainedValue() as? String
+        let fmt = CVPixelBufferGetPixelFormatType(pixelBuffer)
+        let isFullRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+            || fmt == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
+        let is709 = matrix == (kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
+        switch (is709, isFullRange) {
+        case (true,  true):  colorParams = .bt709Full
+        case (true,  false): colorParams = .bt709
+        case (false, true):  colorParams = .bt601Full
+        case (false, false): colorParams = .bt601
         }
-        colorParams = newParams
     }
 
     // MARK: - Vertex helpers
 
-    private static func rgbSize(blendMode: VAPTextureBlendMode,
-                                videoWidth: Int, videoHeight: Int) -> CGSize {
+    static func rgbSize(blendMode: VAPTextureBlendMode,
+                        videoWidth: Int, videoHeight: Int) -> CGSize {
         switch blendMode {
         case .alphaLeft, .alphaRight:
             return CGSize(width: videoWidth / 2, height: videoHeight)
@@ -197,7 +201,7 @@ final class VAPHWDRenderer {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
         // Normalized texture coordinates depend on blend mode
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = texCoords(blendMode: blendMode)
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = Self.texCoords(blendMode: blendMode)
         // 4 vertices: TL, TR, BL, BR (triangle strip)
         return [
             VAPHWDVertex(position: SIMD4(l, t, 0, 1),
@@ -217,7 +221,7 @@ final class VAPHWDRenderer {
 
     /// Returns (rgbTopLeft, rgbBottomRight, alphaTopLeft, alphaBottomRight)
     /// in normalized UV space [0,1].
-    private func texCoords(blendMode: VAPTextureBlendMode)
+    static func texCoords(blendMode: VAPTextureBlendMode)
         -> (SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>) {
         switch blendMode {
         case .alphaRight:

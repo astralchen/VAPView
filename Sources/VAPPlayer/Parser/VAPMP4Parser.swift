@@ -52,11 +52,15 @@ struct VAPMP4Parser {
         guard let moov = root.first(where: { $0.type == "moov" }) else {
             throw VAPError.invalidMP4File
         }
-        // vapc
+        // vapc — may be inside moov or at the top level (sibling of moov)
         var vapcJSON: Data?
         if let vapc = moov.bfsFirst(type: "vapc"),
            case .vapc(let jsonData) = vapc.payload {
             vapcJSON = jsonData
+        } else if let vapc = root.first(where: { $0.type == "vapc" }),
+                  case .vapc(let jsonData) = vapc.payload {
+            vapcJSON = jsonData
+            parserLog.debug("vapc found at top level (outside moov)")
         }
 
         let hasAudio = hasAudioTrack(in: moov)
@@ -89,7 +93,7 @@ struct VAPMP4Parser {
 
     // MARK: - Box tree parsing
 
-    private static func parseBoxes(handle: FileHandle, offset: UInt64, length: UInt64?,
+    static func parseBoxes(handle: FileHandle, offset: UInt64, length: UInt64?,
                                     depth: Int = 0) throws -> [VAPMP4Box] {
         // [M2] 限制递归深度，防止畸形 MP4 触发栈溢出
         guard depth < kMaxBoxDepth else { return [] }

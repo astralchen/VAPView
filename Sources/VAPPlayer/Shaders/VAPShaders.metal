@@ -71,24 +71,27 @@ hwd_yuvFragmentShader(VAPHWDRasterizerData   in        [[stage_in]],
     return float4(rgb * alpha, alpha);
 }
 
-// MARK: - VAP path: YUV base video (no attachment)
+// MARK: - VAP path: YUV base video (alpha split from same video frame)
 
 struct VAPSimpleVertex {
-    float4 position  [[attribute(0)]];
-    float2 texCoord  [[attribute(1)]];
+    float4 position      [[attribute(0)]];
+    float2 texCoord      [[attribute(1)]];
+    float2 alphaTexCoord [[attribute(2)]];
 };
 
 struct VAPSimpleRasterizerData {
     float4 position [[position]];
     float2 texCoord;
+    float2 alphaTexCoord;
 };
 
 vertex VAPSimpleRasterizerData
 vap_vertexShader(uint vertexID [[vertex_id]],
                  constant VAPSimpleVertex *vertices [[buffer(0)]]) {
     VAPSimpleRasterizerData out;
-    out.position = vertices[vertexID].position;
-    out.texCoord = vertices[vertexID].texCoord;
+    out.position      = vertices[vertexID].position;
+    out.texCoord      = vertices[vertexID].texCoord;
+    out.alphaTexCoord = vertices[vertexID].alphaTexCoord;
     return out;
 }
 
@@ -96,7 +99,6 @@ fragment float4
 vap_yuvFragmentShader(VAPSimpleRasterizerData  in        [[stage_in]],
                       texture2d<float>          yTexture  [[texture(0)]],
                       texture2d<float>          uvTexture [[texture(1)]],
-                      texture2d<float>          maskTex   [[texture(2)]],
                       constant ColorParameters  &params   [[buffer(0)]]) {
     constexpr sampler texSampler(mag_filter::linear, min_filter::linear);
 
@@ -109,7 +111,8 @@ vap_yuvFragmentShader(VAPSimpleRasterizerData  in        [[stage_in]],
     float3 rgb = params.colorMatrix * yuv + params.colorOffset;
     rgb = clamp(rgb, 0.0, 1.0);
 
-    float alpha = maskTex.sample(texSampler, in.texCoord).r;
+    // Alpha is extracted from the Y channel of the alpha-side region of the same video frame
+    float alpha = yTexture.sample(texSampler, in.alphaTexCoord).r;
     alpha = clamp(alpha, 0.0, 1.0);
 
     return float4(rgb * alpha, alpha);

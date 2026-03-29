@@ -107,6 +107,77 @@ struct VAPMP4ParserTests {
         #expect(data == json)
     }
 
+    // Verify that vapc at top level (outside moov) is found
+    @Test func topLevelVapcIsFound() {
+        // Build a minimal MP4 with vapc outside moov
+        var data = Data()
+
+        // ftyp box (minimal)
+        let ftyp = Data([
+            0x00, 0x00, 0x00, 0x14,  // size = 20
+            0x66, 0x74, 0x79, 0x70,  // "ftyp"
+            0x69, 0x73, 0x6F, 0x6D,  // "isom"
+            0x00, 0x00, 0x02, 0x00,  // version
+            0x69, 0x73, 0x6F, 0x6D,  // compatible brand
+        ])
+        data.append(ftyp)
+
+        // Empty moov box (no vapc inside)
+        let moovBody = Data([
+            // mvhd (minimal, version 0, 96 bytes after header)
+            0x00, 0x00, 0x00, 0x6C, // size = 108
+            0x6D, 0x76, 0x68, 0x64, // "mvhd"
+        ] + [UInt8](repeating: 0, count: 100))
+        var moovHeader = Data()
+        let moovSize = UInt32(moovBody.count + 8)
+        moovHeader.append(contentsOf: withUnsafeBytes(of: moovSize.bigEndian) { Array($0) })
+        moovHeader.append("moov".data(using: .ascii)!)
+        data.append(moovHeader)
+        data.append(moovBody)
+
+        // vapc box at top level (outside moov)
+        let vapcJSON = Data(#"{"info":{"v":2,"w":750,"h":1334,"fps":30,"videoW":1136,"videoH":1344,"orien":0,"rgbFrame":[0,0,750,1334],"aFrame":[754,0,375,667]}}"#.utf8)
+        let vapcSize = UInt32(vapcJSON.count + 8)
+        var vapcBox = Data()
+        vapcBox.append(contentsOf: withUnsafeBytes(of: vapcSize.bigEndian) { Array($0) })
+        vapcBox.append("vapc".data(using: .ascii)!)
+        vapcBox.append(vapcJSON)
+        data.append(vapcBox)
+
+        // Write to temp file and parse
+        let tmpPath = NSTemporaryDirectory() + "test_toplevel_vapc.mp4"
+        try! data.write(to: URL(fileURLWithPath: tmpPath))
+        defer { try? FileManager.default.removeItem(atPath: tmpPath) }
+
+        // Parser will fail to find video track, but we can check vapcJSON
+        // by trying to parse and catching the error, then checking the box structure
+        // Instead, let's test the box parsing directly
+        let handle = FileHandle(forReadingAtPath: tmpPath)!
+        defer { try? handle.close() }
+        let boxes = try! VAPMP4Parser.parseBoxes(handle: handle, offset: 0, length: nil)
+
+        // Verify vapc is a top-level box
+        let vapc = boxes.first(where: { $0.type == "vapc" })
+        #expect(vapc != nil, "vapc should be found at top level")
+
+        // Verify it's NOT inside moov
+        let moov = boxes.first(where: { $0.type == "moov" })
+        #expect(moov != nil)
+        let vapcInMoov = moov?.bfsFirst(type: "vapc")
+        #expect(vapcInMoov == nil, "vapc should NOT be inside moov")
+
+        // Verify payload
+        if let vapc, case .vapc(let jsonData) = vapc.payload {
+            let decoded = try! JSONDecoder().decode(VAPConfig.self, from: jsonData)
+            #expect(decoded.info.w == 750)
+            #expect(decoded.info.h == 1334)
+            #expect(decoded.info.rgbFrame == [0, 0, 750, 1334])
+            #expect(decoded.info.aFrame == [754, 0, 375, 667])
+        } else {
+            Issue.record("vapc payload not found")
+        }
+    }
+
     @Test func parseMissingFile() {
         #expect(throws: (any Error).self) {
             try VAPMP4Parser.parse(filePath: "/nonexistent/file.mp4")
