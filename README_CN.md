@@ -24,7 +24,7 @@
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/YOUR_ORG/VAPPlayerSwift.git", from: "1.0.0")
+    .package(url: "https://github.com/astralchen/VAPPlayerSwift.git", from: "1.0.0")
 ],
 targets: [
     .target(
@@ -182,4 +182,4 @@ vapView.resourceLoader = MyCustomLoader()
 
 ## 许可证
 
-MIT License. Copyright (C) 2020 Tencent.
+MIT License. Copyright (C) 2026 astralchen.
