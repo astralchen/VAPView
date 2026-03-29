@@ -92,37 +92,99 @@ public final class VAPView: UIView {
 
     /// Play a VAP/HWD animation file.
     ///
-    /// Example:
+    /// The renderer automatically selects the appropriate pipeline based on the MP4 content:
+    /// - **VAP path**: If the MP4 contains a `vapc` box, the renderer reads `rgbFrame`/`aFrame`
+    ///   from it to determine exact RGB and alpha regions. In this case `config.blendMode` is ignored.
+    /// - **HWD path**: If no `vapc` box is present, the renderer uses `config.blendMode` to
+    ///   determine the alpha channel position (left/right/top/bottom 50% split).
+    ///
+    /// ## VAPPlayConfig properties
+    ///
+    /// | Property | Description |
+    /// |---|---|
+    /// | `filePath` | Local file path or `http(s)://` URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. |
+    /// | `blendMode` | Alpha channel position (`.alphaLeft`/`.alphaRight`/`.alphaTop`/`.alphaBottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.alphaRight`. |
+    /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.doNothing`. |
+    /// | `contentMode` | Display scaling: `.scaleToFill` (default), `.aspectFit`, or `.aspectFill`. |
+    /// | `attachmentSources` | Maps `srcId` → ``VAPAttachmentSource`` (`.image`, `.url`, `.text`) for VAP attachment slots defined in the `vapc` config. |
+    /// | `imageLoader` | Custom async image loader for `.url` type attachments. Required when using `.url` attachment sources. |
+    /// | `bufferCount` | Decoded frame buffer depth. Default: 3. |
+    /// | `fps` | Override playback FPS. 0 (default) = use the value from MP4 header. |
+    /// | `playAudio` | Whether to play the audio track if present. Default: `true`. |
+    /// | `maskInfo` | Optional external alpha mask applied over every frame (VAP path only). |
+    /// | `loopCount` | Playback repeat count. 1 = once (default), 0 = infinite, N = N times. When `0`, `.didFinish` is never emitted — call `stop()` explicitly. |
+    ///
+    /// ## Examples
+    ///
+    /// **Basic — play a local file (HWD path, blendMode takes effect):**
     /// ```swift
     /// let config = VAPPlayConfig(
     ///     filePath: Bundle.main.path(forResource: "animation", ofType: "mp4")!,
-    ///     blendMode: .alphaRight,
+    ///     blendMode: .alphaRight
+    /// )
+    /// vapView.play(config: config)
+    /// ```
+    ///
+    /// **Remote URL with progress and event handling:**
+    /// ```swift
+    /// let config = VAPPlayConfig(
+    ///     filePath: "https://example.com/gift.mp4",
     ///     backgroundPolicy: .pauseAndResume,
+    ///     contentMode: .aspectFit,
+    ///     loopCount: 3
+    /// )
+    /// vapView.play(config: config) { event in
+    ///     switch event {
+    ///     case .downloading(let progress):
+    ///         print("downloading: \(Int(progress * 100))%")
+    ///     case .didStart:
+    ///         print("playback started")
+    ///     case .didPlayFrame(let index):
+    ///         break // called every frame
+    ///     case .didLoopFinish(let loop, let totalFrames):
+    ///         print("loop \(loop) done, \(totalFrames) frames")
+    ///     case .didFinish(let totalFrames):
+    ///         print("finished, total frames: \(totalFrames)")
+    ///     case .didStop(let lastFrame):
+    ///         print("stopped at frame \(lastFrame)")
+    ///     case .didFail(let error):
+    ///         print("error: \(error)")
+    ///     }
+    /// }
+    /// ```
+    ///
+    /// **VAP path with dynamic attachments (images, text overlays):**
+    /// ```swift
+    /// let config = VAPPlayConfig(
+    ///     filePath: "https://example.com/vapx_animation.mp4",
     ///     contentMode: .aspectFit,
     ///     attachmentSources: [
     ///         "avatar": .image(UIImage(named: "avatar")!),
     ///         "name":   .text("张三"),
     ///         "banner": .url("https://example.com/banner.png"),
     ///     ],
-    ///     loopCount: 3
-    /// )
-    /// vapView.play(config: config) { event in
-    ///     switch event {
-    ///     case .didStart:
-    ///         print("playback started")
-    ///     case .didFinish(let totalFrames):
-    ///         print("finished, total frames: \(totalFrames)")
-    ///     case .didFail(let error):
-    ///         print("error: \(error)")
-    ///     default:
-    ///         break
+    ///     imageLoader: { url, context in
+    ///         // Custom async image loading for .url attachments
+    ///         let (data, _) = try await URLSession.shared.data(from: url)
+    ///         return UIImage(data: data) ?? UIImage()
     ///     }
-    /// }
+    /// )
+    /// vapView.play(config: config)
+    /// ```
+    ///
+    /// **External mask overlay (VAP path only):**
+    /// ```swift
+    /// let maskData = Data(repeating: 0xFF, count: 200 * 200) // R8 grayscale
+    /// let config = VAPPlayConfig(
+    ///     filePath: "path/to/animation.mp4",
+    ///     maskInfo: VAPMaskInfo(data: maskData, dataSize: CGSize(width: 200, height: 200))
+    /// )
+    /// vapView.play(config: config)
     /// ```
     ///
     /// - Parameters:
-    ///   - config: Full play configuration.
-    ///   - onEvent: Optional closure called for each `VAPEvent`.
+    ///   - config: Full play configuration. See property table above.
+    ///   - onEvent: Optional closure called for each ``VAPEvent``.
     public func play(config: VAPPlayConfig, onEvent: ((VAPEvent) -> Void)? = nil) {
         var cfg = config
         cfg.fps = fps > 0 ? fps : config.fps
@@ -154,7 +216,7 @@ public final class VAPView: UIView {
         let isRemote = cfg.filePath.hasPrefix("http://") || cfg.filePath.hasPrefix("https://")
         if isRemote {
             let loader = resourceLoader
-            playTask = Task { [weak self] in
+            playTask = Task { @MainActor [weak self] in
                 do {
                     let localPath = try await loader.localPath(for: cfg.filePath, onProgress: { progress in
                         wrappedOnEvent?(.downloading(progress: progress))

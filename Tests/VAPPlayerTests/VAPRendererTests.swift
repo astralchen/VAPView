@@ -10,33 +10,24 @@ struct VAPRendererTests {
 
     // MARK: - A. RGB Size Computation
 
-    @Test @MainActor func rgbSizeAlphaRight() {
-        let size = VAPRenderer.rgbSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+    @Test func rgbSizeAlphaRight() {
+        let size = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 1080))
     }
 
-    @Test @MainActor func rgbSizeAlphaLeft() {
-        let size = VAPRenderer.rgbSize(blendMode: .alphaLeft, videoWidth: 1920, videoHeight: 1080)
+    @Test func rgbSizeAlphaLeft() {
+        let size = vapRGBSize(blendMode: .alphaLeft, videoWidth: 1920, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 1080))
     }
 
-    @Test @MainActor func rgbSizeAlphaBottom() {
-        let size = VAPRenderer.rgbSize(blendMode: .alphaBottom, videoWidth: 960, videoHeight: 1080)
+    @Test func rgbSizeAlphaBottom() {
+        let size = vapRGBSize(blendMode: .alphaBottom, videoWidth: 960, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 540))
     }
 
-    @Test @MainActor func rgbSizeAlphaTop() {
-        let size = VAPRenderer.rgbSize(blendMode: .alphaTop, videoWidth: 960, videoHeight: 1080)
+    @Test func rgbSizeAlphaTop() {
+        let size = vapRGBSize(blendMode: .alphaTop, videoWidth: 960, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 540))
-    }
-
-    // HWD renderer should agree
-    @Test @MainActor func hwdRgbSizeMatchesVAPRenderer() {
-        for mode in [VAPTextureBlendMode.alphaLeft, .alphaRight, .alphaTop, .alphaBottom] {
-            let vap = VAPRenderer.rgbSize(blendMode: mode, videoWidth: 1920, videoHeight: 1080)
-            let hwd = VAPHWDRenderer.rgbSize(blendMode: mode, videoWidth: 1920, videoHeight: 1080)
-            #expect(vap == hwd, "rgbSize mismatch for \(mode)")
-        }
     }
 
     // MARK: - B. Vertex Rect
@@ -195,7 +186,7 @@ struct VAPRendererTests {
         view.vapContentMode = .aspectFit
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = VAPRenderer.rgbSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
 
         let wrongRect = view.vertexRect(videoSize: fullSize)
         let correctRect = view.vertexRect(videoSize: rgbSize)
@@ -213,7 +204,7 @@ struct VAPRendererTests {
         view.vapContentMode = .aspectFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = VAPRenderer.rgbSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
 
         let wrongRect = view.vertexRect(videoSize: fullSize)
         let correctRect = view.vertexRect(videoSize: rgbSize)
@@ -322,7 +313,7 @@ struct VAPRendererTests {
         view.vapContentMode = .scaleToFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = VAPRenderer.rgbSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
 
         let rectFull = view.vertexRect(videoSize: fullSize)
         let rectRGB = view.vertexRect(videoSize: rgbSize)

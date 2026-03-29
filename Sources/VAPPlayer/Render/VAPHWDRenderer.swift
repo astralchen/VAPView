@@ -51,18 +51,21 @@ final class VAPHWDRenderer {
             return
         }
 
-        updateColorParams(from: pixelBuffer)
-        let textures = makeYUVTextures(from: pixelBuffer)
-        guard textures.count == 2 else { return }
+        colorParams = vapColorParameters(from: pixelBuffer)
+        let textures = vapMakeYUVTextures(from: pixelBuffer, device: device, textureCache: textureCache)
+        guard textures.count == 2 else {
+            rendererLog.error("HWD: failed to create YUV textures, frame skipped")
+            return
+        }
 
         let videoWidth  = CVPixelBufferGetWidth(pixelBuffer)
         let videoHeight = CVPixelBufferGetHeight(pixelBuffer)
         let vertices = makeVertices(blendMode: blendMode,
                                    videoSize: CGSize(width: videoWidth, height: videoHeight),
                                    viewRect: metalView.vertexRect(
-                                       videoSize: Self.rgbSize(blendMode: blendMode,
-                                                               videoWidth: videoWidth,
-                                                               videoHeight: videoHeight)))
+                                       videoSize: vapRGBSize(blendMode: blendMode,
+                                                              videoWidth: videoWidth,
+                                                              videoHeight: videoHeight)))
 
         guard let buffer = device.makeBuffer(bytes: vertices,
                                              length: vertices.count * MemoryLayout<VAPHWDVertex>.stride,
@@ -115,85 +118,7 @@ final class VAPHWDRenderer {
         return try device.makeRenderPipelineState(descriptor: desc)
     }
 
-    // MARK: - Texture creation from CVPixelBuffer (NV12 bi-planar)
-
-    private func makeYUVTextures(from pixelBuffer: CVPixelBuffer) -> [MTLTexture] {
-        let yWidth   = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
-        let yHeight  = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
-        let uvWidth  = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1)
-        let uvHeight = CVPixelBufferGetHeightOfPlane(pixelBuffer, 1)
-
-        // Fast path: IOSurface-backed buffer (real device)
-        if let cache = textureCache {
-            CVMetalTextureCacheFlush(cache, 0)
-            func planeTexture(plane: Int, width: Int, height: Int, format: MTLPixelFormat) -> MTLTexture? {
-                var metalTexture: CVMetalTexture?
-                let status = CVMetalTextureCacheCreateTextureFromImage(
-                    kCFAllocatorDefault, cache, pixelBuffer, nil, format, width, height, plane, &metalTexture)
-                guard status == kCVReturnSuccess, let mt = metalTexture else { return nil }
-                return CVMetalTextureGetTexture(mt)
-            }
-            if let yTex  = planeTexture(plane: 0, width: yWidth,  height: yHeight,  format: .r8Unorm),
-               let uvTex = planeTexture(plane: 1, width: uvWidth, height: uvHeight, format: .rg8Unorm) {
-                return [yTex, uvTex]
-            }
-        }
-
-        // Slow path: CPU copy for simulator (pixel buffers not IOSurface-backed)
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-        return makeCPUTextures(pixelBuffer: pixelBuffer,
-                               yWidth: yWidth, yHeight: yHeight,
-                               uvWidth: uvWidth, uvHeight: uvHeight)
-    }
-
-    private func makeCPUTextures(pixelBuffer: CVPixelBuffer,
-                                 yWidth: Int, yHeight: Int,
-                                 uvWidth: Int, uvHeight: Int) -> [MTLTexture] {
-        func makeTexture(plane: Int, width: Int, height: Int, format: MTLPixelFormat, bytesPerPixel: Int) -> MTLTexture? {
-            guard let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane) else { return nil }
-            let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, plane)
-            let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
-            desc.usage = .shaderRead
-            guard let tex = device.makeTexture(descriptor: desc) else { return nil }
-            tex.replace(region: MTLRegionMake2D(0, 0, width, height),
-                        mipmapLevel: 0,
-                        withBytes: baseAddr,
-                        bytesPerRow: bytesPerRow)
-            return tex
-        }
-        guard let yTex  = makeTexture(plane: 0, width: yWidth,  height: yHeight,  format: .r8Unorm,  bytesPerPixel: 1),
-              let uvTex = makeTexture(plane: 1, width: uvWidth, height: uvHeight, format: .rg8Unorm, bytesPerPixel: 2)
-        else { return [] }
-        return [yTex, uvTex]
-    }
-
-    private func updateColorParams(from pixelBuffer: CVPixelBuffer) {
-        let matrix = CVBufferGetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil)?
-            .takeUnretainedValue() as? String
-        let fmt = CVPixelBufferGetPixelFormatType(pixelBuffer)
-        let isFullRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            || fmt == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
-        let is709 = matrix == (kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
-        switch (is709, isFullRange) {
-        case (true,  true):  colorParams = .bt709Full
-        case (true,  false): colorParams = .bt709
-        case (false, true):  colorParams = .bt601Full
-        case (false, false): colorParams = .bt601
-        }
-    }
-
     // MARK: - Vertex helpers
-
-    static func rgbSize(blendMode: VAPTextureBlendMode,
-                        videoWidth: Int, videoHeight: Int) -> CGSize {
-        switch blendMode {
-        case .alphaLeft, .alphaRight:
-            return CGSize(width: videoWidth / 2, height: videoHeight)
-        case .alphaTop, .alphaBottom:
-            return CGSize(width: videoWidth, height: videoHeight / 2)
-        }
-    }
 
     private func makeVertices(blendMode: VAPTextureBlendMode,
                               videoSize: CGSize,

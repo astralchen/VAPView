@@ -32,13 +32,15 @@ public struct VAPCommonInfo: Decodable, Sendable {
 
     /// Returns the RGB rect within the video, or nil if rgbFrame is absent/invalid.
     var rgbRect: CGRect? {
-        guard let f = rgbFrame, f.count == 4 else { return nil }
+        guard let f = rgbFrame, f.count == 4,
+              f[2] > 0, f[3] > 0, f[0] >= 0, f[1] >= 0 else { return nil }
         return CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
     }
 
     /// Returns the alpha rect within the video, or nil if aFrame is absent/invalid.
     var alphaRect: CGRect? {
-        guard let f = aFrame, f.count == 4 else { return nil }
+        guard let f = aFrame, f.count == 4,
+              f[2] > 0, f[3] > 0, f[0] >= 0, f[1] >= 0 else { return nil }
         return CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
     }
 }

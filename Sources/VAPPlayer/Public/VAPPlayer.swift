@@ -11,7 +11,11 @@ import AVFoundation
 public struct VAPPlayConfig: Sendable {
     /// Source file path or URL string
     public var filePath: String
-    /// Alpha channel position in the video frame
+    /// Alpha channel position in the video frame.
+    ///
+    /// Only takes effect when the MP4 does **not** contain a `vapc` box with
+    /// `rgbFrame`/`aFrame` fields. When those fields are present, the renderer
+    /// reads the exact RGB and alpha regions from the config and this value is ignored.
     public var blendMode: VAPTextureBlendMode
     /// Background lifecycle behaviour
     public var backgroundPolicy: VAPBackgroundPolicy

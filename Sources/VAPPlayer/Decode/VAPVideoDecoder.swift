@@ -209,7 +209,8 @@ actor VAPVideoDecoder {
             decoderLog.error("readSampleData: read error index=\(sample.index) \(error)")
             return nil
         }
-        let avccData = toAVCCFormat(raw)
+        // MP4 sample data is already in AVCC (length-prefixed NAL unit) format.
+        let avccData = raw
         decoderLog.debug("readSampleData: avccData.count=\(avccData.count) index=\(sample.index)")
         var blockBuffer: CMBlockBuffer?
         var status = CMBlockBufferCreateWithMemoryBlock(
@@ -242,10 +243,6 @@ actor VAPVideoDecoder {
         return blockBuffer
     }
 
-    private func toAVCCFormat(_ data: Data) -> Data {
-        // Data from MP4 is already in AVCC (length-prefixed) format
-        return data
-    }
 
     private func makeH264FormatDesc(sps: Data, pps: Data) throws -> CMVideoFormatDescription {
         var desc: CMVideoFormatDescription?

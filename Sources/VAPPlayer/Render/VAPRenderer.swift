@@ -20,6 +20,8 @@ final class VAPRenderer {
     private let attachPipelineState: MTLRenderPipelineState
     private var colorParams: VAPColorParameters = .bt601Full
     private var textureCache: CVMetalTextureCache?
+    /// 1x1 opaque white texture used as fallback when no mask is provided.
+    private let defaultMaskTexture: MTLTexture
 
     // MARK: - Init
 
@@ -35,6 +37,7 @@ final class VAPRenderer {
         var cache: CVMetalTextureCache?
         CVMetalTextureCacheCreate(kCFAllocatorDefault, nil, device, nil, &cache)
         self.textureCache = cache
+        self.defaultMaskTexture = try Self.makeWhiteTexture(device: device)
     }
 
     // MARK: - Render
@@ -101,9 +104,12 @@ final class VAPRenderer {
                              config: VAPConfig?,
                              metalView: VAPMetalView,
                              encoder: MTLRenderCommandEncoder) {
-        updateColorParams(from: pixelBuffer)
-        let textures = makeYUVTextures(from: pixelBuffer)
-        guard textures.count == 2 else { return }
+        colorParams = vapColorParameters(from: pixelBuffer)
+        let textures = vapMakeYUVTextures(from: pixelBuffer, device: device, textureCache: textureCache)
+        guard textures.count == 2 else {
+            rendererLog.error("VAP drawYUVBase: failed to create YUV textures, frame skipped")
+            return
+        }
 
         let vw = CVPixelBufferGetWidth(pixelBuffer)
         let vh = CVPixelBufferGetHeight(pixelBuffer)
@@ -123,9 +129,9 @@ final class VAPRenderer {
                                 alphaRect: alphaRect,
                                 videoWidth: CGFloat(info.videoW),
                                 videoHeight: CGFloat(info.videoH))
-            rendererLog.debug("VAP drawYUVBase: video=\(vw)x\(vh) canvas=\(info.w)x\(info.h) rgbFrame=\(rgbRect) aFrame=\(alphaRect)")
+            rendererLog.debug("VAP drawYUVBase: using vapc rgbFrame/aFrame (blendMode ignored). video=\(vw)x\(vh) canvas=\(info.w)x\(info.h) rgbFrame=\(rgbRect) aFrame=\(alphaRect)")
         } else {
-            let rgbVideoSize = Self.rgbSize(blendMode: blendMode, videoWidth: vw, videoHeight: vh)
+            let rgbVideoSize = vapRGBSize(blendMode: blendMode, videoWidth: vw, videoHeight: vh)
             viewRect = metalView.vertexRect(videoSize: rgbVideoSize)
             verts = makeFullQuad(viewRect: viewRect, blendMode: blendMode)
             rendererLog.debug("VAP drawYUVBase: full=\(vw)x\(vh) rgb=\(Int(rgbVideoSize.width))x\(Int(rgbVideoSize.height)) blendMode=\(blendMode.rawValue)")
@@ -198,21 +204,25 @@ final class VAPRenderer {
 
         encoder.setRenderPipelineState(attachPipelineState)
         encoder.setVertexBuffer(vBuf, offset: 0, index: 0)
-        encoder.setFragmentTexture(texture,     index: 0)
-        encoder.setFragmentTexture(maskTexture, index: 1)
+        encoder.setFragmentTexture(texture,                          index: 0)
+        encoder.setFragmentTexture(maskTexture ?? defaultMaskTexture, index: 1)
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
     // MARK: - Helpers
 
-    static func rgbSize(blendMode: VAPTextureBlendMode,
-                        videoWidth: Int, videoHeight: Int) -> CGSize {
-        switch blendMode {
-        case .alphaLeft, .alphaRight:
-            return CGSize(width: videoWidth / 2, height: videoHeight)
-        case .alphaTop, .alphaBottom:
-            return CGSize(width: videoWidth, height: videoHeight / 2)
+    /// Creates a 1x1 R8Unorm white texture (alpha = 1.0) used as default mask.
+    private static func makeWhiteTexture(device: MTLDevice) throws -> MTLTexture {
+        let desc = MTLTextureDescriptor.texture2DDescriptor(
+            pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
+        desc.usage = .shaderRead
+        guard let tex = device.makeTexture(descriptor: desc) else {
+            throw VAPError.metalUnavailable
         }
+        var white: UInt8 = 0xFF
+        tex.replace(region: MTLRegionMake2D(0, 0, 1, 1),
+                    mipmapLevel: 0, withBytes: &white, bytesPerRow: 1)
+        return tex
     }
 
     /// Build a quad using explicit RGB and alpha regions from vapc config.
@@ -261,75 +271,6 @@ final class VAPRenderer {
             VAPSimpleVertex(position: SIMD4(l, b, 0, 1), texCoord: SIMD2(rgbTL.x, rgbBR.y),   alphaTexCoord: SIMD2(alphaTL.x, alphaBR.y)),
             VAPSimpleVertex(position: SIMD4(r, b, 0, 1), texCoord: SIMD2(rgbBR.x, rgbBR.y),   alphaTexCoord: SIMD2(alphaBR.x, alphaBR.y))
         ]
-    }
-
-    private func makeYUVTextures(from pixelBuffer: CVPixelBuffer) -> [MTLTexture] {
-        let yWidth   = CVPixelBufferGetWidthOfPlane(pixelBuffer, 0)
-        let yHeight  = CVPixelBufferGetHeightOfPlane(pixelBuffer, 0)
-        let uvWidth  = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1)
-        let uvHeight = CVPixelBufferGetHeightOfPlane(pixelBuffer, 1)
-
-        // Fast path: IOSurface-backed buffer (real device)
-        if let cache = textureCache {
-            CVMetalTextureCacheFlush(cache, 0)
-            func make(_ plane: Int, _ w: Int, _ h: Int, _ fmt: MTLPixelFormat) -> MTLTexture? {
-                var mt: CVMetalTexture?
-                guard CVMetalTextureCacheCreateTextureFromImage(
-                    kCFAllocatorDefault, cache, pixelBuffer, nil, fmt, w, h, plane, &mt) == kCVReturnSuccess,
-                      let mt else { return nil }
-                return CVMetalTextureGetTexture(mt)
-            }
-            if let y  = make(0, yWidth,  yHeight,  .r8Unorm),
-               let uv = make(1, uvWidth, uvHeight, .rg8Unorm) {
-                return [y, uv]
-            }
-        }
-
-        // Slow path: CPU copy for simulator (pixel buffers not IOSurface-backed)
-        CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
-        defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
-        return makeCPUTextures(pixelBuffer: pixelBuffer,
-                               yWidth: yWidth, yHeight: yHeight,
-                               uvWidth: uvWidth, uvHeight: uvHeight)
-    }
-
-    private func makeCPUTextures(pixelBuffer: CVPixelBuffer,
-                                 yWidth: Int, yHeight: Int,
-                                 uvWidth: Int, uvHeight: Int) -> [MTLTexture] {
-        func makeTexture(plane: Int, width: Int, height: Int, format: MTLPixelFormat) -> MTLTexture? {
-            guard let baseAddr = CVPixelBufferGetBaseAddressOfPlane(pixelBuffer, plane) else { return nil }
-            let bytesPerRow = CVPixelBufferGetBytesPerRowOfPlane(pixelBuffer, plane)
-            let desc = MTLTextureDescriptor.texture2DDescriptor(pixelFormat: format, width: width, height: height, mipmapped: false)
-            desc.usage = .shaderRead
-            guard let tex = device.makeTexture(descriptor: desc) else { return nil }
-            tex.replace(region: MTLRegionMake2D(0, 0, width, height),
-                        mipmapLevel: 0,
-                        withBytes: baseAddr,
-                        bytesPerRow: bytesPerRow)
-            return tex
-        }
-        guard let yTex  = makeTexture(plane: 0, width: yWidth,  height: yHeight,  format: .r8Unorm),
-              let uvTex = makeTexture(plane: 1, width: uvWidth, height: uvHeight, format: .rg8Unorm)
-        else {
-            rendererLog.error("VAP makeCPUTextures: failed to create textures")
-            return []
-        }
-        return [yTex, uvTex]
-    }
-
-    private func updateColorParams(from pixelBuffer: CVPixelBuffer) {
-        let matrix = CVBufferGetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil)?
-            .takeUnretainedValue() as? String
-        let fmt = CVPixelBufferGetPixelFormatType(pixelBuffer)
-        let isFullRange = fmt == kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
-            || fmt == kCVPixelFormatType_420YpCbCr10BiPlanarFullRange
-        let is709 = matrix == (kCVImageBufferYCbCrMatrix_ITU_R_709_2 as String)
-        switch (is709, isFullRange) {
-        case (true,  true):  colorParams = .bt709Full
-        case (true,  false): colorParams = .bt709
-        case (false, true):  colorParams = .bt601Full
-        case (false, false): colorParams = .bt601
-        }
     }
 
     // MARK: - Pipeline factory
