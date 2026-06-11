@@ -17,6 +17,13 @@ enum VAPModule: String {
 
 struct VAPLogger: Sendable {
     private let logger: Logger
+    private static let debugLoggingEnabled: Bool = {
+        #if DEBUG
+        ProcessInfo.processInfo.environment["VAP_DEBUG_LOGS"] == "1"
+        #else
+        false
+        #endif
+    }()
 
     init(module: VAPModule) {
         logger = Logger(subsystem: "com.tencent.vap", category: module.rawValue)
@@ -30,8 +37,10 @@ struct VAPLogger: Sendable {
         logger.error("\(message, privacy: .public)")
     }
 
-    func debug(_ message: String) {
-        logger.debug("\(message, privacy: .public)")
+    func debug(_ message: @autoclosure () -> String) {
+        guard Self.debugLoggingEnabled else { return }
+        let value = message()
+        logger.debug("\(value, privacy: .public)")
     }
 }
 

@@ -443,22 +443,60 @@ struct VAPMP4Parser {
         }
 
         var dts: Double = 0
-        return (0..<sampleCount).map { i in
+        var samples: [VAPMP4Sample] = []
+        samples.reserveCapacity(sampleCount)
+        var samplePTS: [Double] = []
+        samplePTS.reserveCapacity(sampleCount)
+        var sampleDTS: [Double] = []
+        sampleDTS.reserveCapacity(sampleCount)
+
+        for i in 0..<sampleCount {
             let delta = i < deltas.count ? Double(deltas[i]) : 0
             let cttsOff = i < cttsOffsets.count ? Double(cttsOffsets[i]) : 0
             let pts = timeScale > 0 ? (dts + cttsOff) / timeScale : 0
             let dtsSec = timeScale > 0 ? dts / timeScale : 0
             let sz: UInt32 = defaultSize > 0 ? defaultSize : (i < sizes.count ? sizes[i] : 0)
-            let s = VAPMP4Sample(index: i, offset: sampleOffsets[i], size: sz, pts: pts, dts: dtsSec,
+            let s = VAPMP4Sample(index: i, presentationIndex: i,
+                                 offset: sampleOffsets[i], size: sz, pts: pts, dts: dtsSec,
                                  isKeySample: keySet.isEmpty || keySet.contains(i + 1))
+            samples.append(s)
+            samplePTS.append(pts)
+            sampleDTS.append(dtsSec)
             dts += delta
-            return s
+        }
+
+        let presentation = presentationIndices(pts: samplePTS, dts: sampleDTS)
+        return samples.enumerated().map { i, sample in
+            VAPMP4Sample(index: sample.index,
+                         presentationIndex: i < presentation.count ? presentation[i] : i,
+                         offset: sample.offset,
+                         size: sample.size,
+                         pts: sample.pts,
+                         dts: sample.dts,
+                         isKeySample: sample.isKeySample)
         }
     }
 
     private static func computeFPS(samples: [VAPMP4Sample], duration: Double) -> Int {
         guard duration > 0 else { return kVAPDefaultFPS }
         return max(kVAPMinFPS, min(Int((Double(samples.count) / duration).rounded()), kVAPMaxFPS))
+    }
+
+    static func presentationIndices(pts: [Double], dts: [Double]) -> [Int] {
+        let count = pts.count
+        guard count > 0 else { return [] }
+        let presentationOrder = (0..<count).sorted {
+            if pts[$0] != pts[$1] { return pts[$0] < pts[$1] }
+            let lhsDTS = $0 < dts.count ? dts[$0] : 0
+            let rhsDTS = $1 < dts.count ? dts[$1] : 0
+            if lhsDTS != rhsDTS { return lhsDTS < rhsDTS }
+            return $0 < $1
+        }
+        var indices = [Int](repeating: 0, count: count)
+        for (presentationIndex, sampleIndex) in presentationOrder.enumerated() {
+            indices[sampleIndex] = presentationIndex
+        }
+        return indices
     }
 
     // MARK: - Byte utilities
@@ -488,4 +526,3 @@ struct VAPMP4Parser {
         }
     }
 }
-

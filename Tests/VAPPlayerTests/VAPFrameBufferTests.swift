@@ -69,4 +69,34 @@ struct VAPFrameBufferTests {
         #expect(await buf.count == 0)
         #expect(await buf.isEmpty == true)
     }
+
+    @Test func popAtOrAfterDropsStaleFrames() async {
+        let buf = VAPFrameBufferActor(capacity: 5)
+        for i in 0..<4 {
+            await buf.push(VAPDecodedFrame(pixelBuffer: makePixelBuffer(), frameIndex: i, pts: Double(i)))
+        }
+
+        let frame = await buf.popFrame(atOrAfter: 2)
+
+        #expect(frame?.frameIndex == 2)
+        #expect(await buf.count == 1)
+        let remaining = await buf.pop()
+        #expect(remaining?.frameIndex == 3)
+    }
+
+    @Test func popExactFrameWaitsForMissingPresentationFrame() async {
+        let buf = VAPFrameBufferActor(capacity: 5)
+        await buf.push(VAPDecodedFrame(pixelBuffer: makePixelBuffer(), frameIndex: 0, pts: 0))
+        await buf.push(VAPDecodedFrame(pixelBuffer: makePixelBuffer(), frameIndex: 3, pts: 3))
+        await buf.push(VAPDecodedFrame(pixelBuffer: makePixelBuffer(), frameIndex: 1, pts: 1))
+
+        #expect(await buf.popFrame(at: 0)?.frameIndex == 0)
+        #expect(await buf.popFrame(at: 2) == nil)
+        #expect(await buf.count == 2)
+
+        await buf.push(VAPDecodedFrame(pixelBuffer: makePixelBuffer(), frameIndex: 2, pts: 2))
+        #expect(await buf.popFrame(at: 1)?.frameIndex == 1)
+        #expect(await buf.popFrame(at: 2)?.frameIndex == 2)
+        #expect(await buf.popFrame(at: 3)?.frameIndex == 3)
+    }
 }

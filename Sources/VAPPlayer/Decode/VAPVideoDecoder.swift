@@ -153,13 +153,26 @@ actor VAPVideoDecoder {
             }
         }
 
-        let frame = VAPDecodedFrame(pixelBuffer: pixelBuffer, frameIndex: index, pts: sample.pts)
+        let frame = VAPDecodedFrame(pixelBuffer: pixelBuffer,
+                                    frameIndex: sample.presentationIndex,
+                                    pts: sample.pts)
         await buffer.push(frame)
-        if index < 3 { decoderLog.debug("decoded+pushed frame \(index) bufCount=\(await buffer.count)") }
+        if index < 3 {
+            let count = await buffer.count
+            decoderLog.debug("decoded+pushed sample \(index) presentation=\(sample.presentationIndex) bufCount=\(count)")
+        }
     }
 
     func popFrame() async -> VAPDecodedFrame? {
         await buffer.pop()
+    }
+
+    func popFrame(atOrAfter targetIndex: Int) async -> VAPDecodedFrame? {
+        await buffer.popFrame(atOrAfter: targetIndex)
+    }
+
+    func popFrame(at targetIndex: Int) async -> VAPDecodedFrame? {
+        await buffer.popFrame(at: targetIndex)
     }
 
     func bufferCount() async -> Int {
@@ -168,6 +181,13 @@ actor VAPVideoDecoder {
 
     func bufferIsFull() async -> Bool {
         await buffer.isFull
+    }
+
+    func waitUntilBufferHasSpace() async throws {
+        while await buffer.isFull {
+            try Task.checkCancellation()
+            try await Task.sleep(nanoseconds: 1_000_000)
+        }
     }
 
     /// Reset the decoder for a new loop cycle.

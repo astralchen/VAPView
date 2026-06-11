@@ -8,6 +8,7 @@ import Foundation
 
 struct VAPMP4Sample: Sendable {
     let index: Int
+    let presentationIndex: Int
     let offset: UInt64
     let size: UInt32
     let pts: Double
@@ -85,4 +86,3 @@ struct VAPMP4Box: Sendable {
         return nil
     }
 }
-

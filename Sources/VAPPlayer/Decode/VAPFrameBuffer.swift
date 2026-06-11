@@ -28,12 +28,39 @@ actor VAPFrameBufferActor {
     var isEmpty: Bool { frames.isEmpty }
 
     func push(_ frame: VAPDecodedFrame) {
-        frames.append(frame)
+        if let index = frames.firstIndex(where: { $0.frameIndex > frame.frameIndex }) {
+            frames.insert(frame, at: index)
+        } else {
+            frames.append(frame)
+        }
     }
 
     func pop() -> VAPDecodedFrame? {
         guard !frames.isEmpty else { return nil }
         return frames.removeFirst()
+    }
+
+    func popFrame(atOrAfter targetIndex: Int) -> VAPDecodedFrame? {
+        while let frame = frames.first {
+            if frame.frameIndex >= targetIndex {
+                return frames.removeFirst()
+            }
+            frames.removeFirst()
+        }
+        return nil
+    }
+
+    func popFrame(at targetIndex: Int) -> VAPDecodedFrame? {
+        while let frame = frames.first {
+            if frame.frameIndex == targetIndex {
+                return frames.removeFirst()
+            }
+            if frame.frameIndex > targetIndex {
+                return nil
+            }
+            frames.removeFirst()
+        }
+        return nil
     }
 
     func clear() {

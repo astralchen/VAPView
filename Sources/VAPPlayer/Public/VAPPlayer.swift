@@ -219,7 +219,8 @@ public final class VAPPlayer {
             var loopIndex = 0
 
             // 5. Create decoder (reset between cycles, not recreated)
-            let bufCount    = max(1, config.bufferCount)
+            let reorderBufferDepth = Self.requiredBufferDepth(for: info.videoSamples)
+            let bufCount    = max(max(1, config.bufferCount), reorderBufferDepth)
             let decoder     = VAPVideoDecoder(info: info, bufferCapacity: bufCount)
             try await decoder.prepare()
             playerLog.debug("decoder prepared bufCount=\(bufCount) totalFrames=\(info.frameCount)")
@@ -244,24 +245,28 @@ public final class VAPPlayer {
                 }
 
                 let cycleStart = loopIndex == 0 ? startFrame : 0
-                for i in cycleStart..<(cycleStart + bufCount) {
+                let initialDecodeEnd = min(cycleStart + bufCount, totalFrames)
+                for i in cycleStart..<initialDecodeEnd {
                     guard !Task.isCancelled else {
                         await decoder.invalidate()
                         return
                     }
                     try await decoder.decodeFrame(at: i)
                 }
+                let decodeProducer = Self.startDecodeProducer(decoder: decoder,
+                                                               startIndex: initialDecodeEnd,
+                                                               totalFrames: totalFrames)
 
                 audioPlayer?.play()
                 playerLog.debug("didStart loop=\(loopIndex)")
                 emitEvent(.didStart, epoch: epoch)
 
                 var frameIndex = cycleStart
-                var nextDecode = cycleStart + bufCount
 
                 // Inner render loop
                 while frameIndex < totalFrames {
                     if Task.isCancelled {
+                        decodeProducer.cancel()
                         stopAudio()
                         playerLog.debug("didStop lastFrame=\(frameIndex)")
                         emitEvent(.didStop(lastFrame: frameIndex), epoch: epoch)
@@ -271,12 +276,12 @@ public final class VAPPlayer {
 
                     let frameStart = CACurrentMediaTime()
 
-                    // Pop frame — wait up to one full frame duration before skipping.
+                    // Pop the exact presentation frame — wait up to one full frame duration before skipping.
                     // Each retry sleeps 2 ms; ~(frameDuration / 0.002) retries max.
                     var decodedFrame: VAPDecodedFrame?
                     let maxRetries = max(10, Int(frameDuration / 0.002))
                     for _ in 0..<maxRetries {
-                        decodedFrame = await decoder.popFrame()
+                        decodedFrame = await decoder.popFrame(at: frameIndex)
                         if decodedFrame != nil { break }
                         try await Task.sleep(nanoseconds: 2_000_000)
                     }
@@ -300,21 +305,12 @@ public final class VAPPlayer {
                                    config: attachResources?.config,
                                    attachmentTextures: attachResources?.textures ?? [:],
                                    maskTexture: externalMaskTexture ?? attachResources?.maskTexture,
-                                   frameIndex: frameIndex)
+                                   frameIndex: frame.frameIndex)
                     }
 
-                    emitEvent(.didPlayFrame(index: frameIndex), epoch: epoch)
+                    emitEvent(.didPlayFrame(index: frame.frameIndex), epoch: epoch)
 
-                    // Kick off next decode (only if not already cancelled)
-                    if !Task.isCancelled, nextDecode < totalFrames {
-                        let decIdx = nextDecode
-                        nextDecode += 1
-                        Task.detached(priority: .userInitiated) {
-                            try? await decoder.decodeFrame(at: decIdx)
-                        }
-                    }
-
-                    frameIndex += 1
+                    frameIndex = frame.frameIndex + 1
                     currentFrameIndex = frameIndex
 
                     // Frame pacing
@@ -324,6 +320,8 @@ public final class VAPPlayer {
                         try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
                     }
                 }
+                decodeProducer.cancel()
+                await decodeProducer.value
 
                 stopAudio()
 
@@ -350,6 +348,44 @@ public final class VAPPlayer {
                 emitEvent(.didFail(.unknown(error.localizedDescription)), epoch: epoch)
             }
         }
+    }
+
+    private nonisolated static func startDecodeProducer(decoder: VAPVideoDecoder,
+                                                        startIndex: Int,
+                                                        totalFrames: Int) -> Task<Void, Never> {
+        Task.detached(priority: .userInitiated) {
+            var index = startIndex
+            while index < totalFrames {
+                do {
+                    try Task.checkCancellation()
+                    try await decoder.waitUntilBufferHasSpace()
+                    try Task.checkCancellation()
+                    try await decoder.decodeFrame(at: index)
+                    index += 1
+                } catch is CancellationError {
+                    return
+                } catch {
+                    decoderLog.error("decode producer failed index=\(index): \(error)")
+                    return
+                }
+            }
+        }
+    }
+
+    private nonisolated static func requiredBufferDepth(for samples: [VAPMP4Sample]) -> Int {
+        guard !samples.isEmpty else { return 1 }
+
+        var sampleIndexForPresentation = [Int](repeating: 0, count: samples.count)
+        for (sampleIndex, sample) in samples.enumerated()
+            where sample.presentationIndex >= 0 && sample.presentationIndex < samples.count {
+            sampleIndexForPresentation[sample.presentationIndex] = sampleIndex
+        }
+
+        var depth = 1
+        for (presentationIndex, sampleIndex) in sampleIndexForPresentation.enumerated() {
+            depth = max(depth, sampleIndex - presentationIndex + 1)
+        }
+        return depth
     }
 
     // MARK: - Audio

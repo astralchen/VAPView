@@ -4,7 +4,7 @@ import VAPPlayer
 final class ViewController: UIViewController {
 
 //    private let remoteURL = "https://qiniu-xbyy.yinyou.live/channel/gift/QFB6BC-1774343076586.mp4"
-    private let remoteURL = "https://ymres.yinyou.live/channel/gift/riwSrp-1701777916535.mp4"
+    private let remoteURL = "https://qiniu-xbyy.yinyou.live/channel/gift/nHXSQ3-1770173189405.mp4"
 
     private lazy var vapView: VAPView = {
         let v = VAPView(frame: .zero)
@@ -126,30 +126,30 @@ final class ViewController: UIViewController {
 
         vapView.play(config: config) { [weak self] event in
             guard let self else { return }
-            print("[VAPDemo] onEvent \(event)")
-            DispatchQueue.main.async {
-                switch event {
-                case .downloading(let p):
-                    self.progressBar.isHidden = false
-                    self.progressBar.setProgress(Float(p), animated: true)
-                    self.setStatus(String(format: "Downloading… %.0f%%", p * 100))
-                case .didStart:
-                    self.progressBar.isHidden = true
-                    self.setStatus("▶ Playing")
-                case .didPlayFrame(let idx):
-                    if idx % 10 == 0 { self.setStatus("Frame \(idx)") }
-                case .didLoopFinish(let loop, let total):
-                    self.setStatus("Loop \(loop) done — \(total) frames")
-                case .didFinish(let total):
-                    self.setStatus("✓ Finished — \(total) frames")
-                case .didStop(let last):
-                    self.setStatus("■ Stopped at frame \(last)")
-                case .didFail(let err):
-                    let msg = "✗ Error: \(err)"
-                    print("[VAPDemo] \(msg)")
-                    self.setStatus(msg)
-                }
-            }
+//            print("[VAPDemo] onEvent \(event)")
+//            DispatchQueue.main.async {
+//                switch event {
+//                case .downloading(let p):
+//                    self.progressBar.isHidden = false
+//                    self.progressBar.setProgress(Float(p), animated: true)
+//                    self.setStatus(String(format: "Downloading… %.0f%%", p * 100))
+//                case .didStart:
+//                    self.progressBar.isHidden = true
+//                    self.setStatus("▶ Playing")
+//                case .didPlayFrame(let idx):
+//                    if idx % 10 == 0 { self.setStatus("Frame \(idx)") }
+//                case .didLoopFinish(let loop, let total):
+//                    self.setStatus("Loop \(loop) done — \(total) frames")
+//                case .didFinish(let total):
+//                    self.setStatus("✓ Finished — \(total) frames")
+//                case .didStop(let last):
+//                    self.setStatus("■ Stopped at frame \(last)")
+//                case .didFail(let err):
+//                    let msg = "✗ Error: \(err)"
+//                    print("[VAPDemo] \(msg)")
+//                    self.setStatus(msg)
+//                }
+//            }
         }
     }
 

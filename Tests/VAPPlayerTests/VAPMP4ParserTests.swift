@@ -107,6 +107,15 @@ struct VAPMP4ParserTests {
         #expect(data == json)
     }
 
+    @Test func presentationIndicesUsePtsOrderForBFrames() {
+        let pts = [1024.0, 2560.0, 1536.0, 2048.0]
+        let dts = [0.0, 512.0, 1024.0, 1536.0]
+
+        let indices = VAPMP4Parser.presentationIndices(pts: pts, dts: dts)
+
+        #expect(indices == [0, 3, 1, 2])
+    }
+
     // Verify that vapc at top level (outside moov) is found
     @Test func topLevelVapcIsFound() {
         // Build a minimal MP4 with vapc outside moov
