@@ -24,7 +24,7 @@ In Xcode choose **File › Add Package Dependencies** and enter this repository 
 
 ```swift
 dependencies: [
-    .package(url: "https://github.com/astralchen/VAPPlayerSwift.git", from: "1.0.0")
+    .package(url: "https://github.com/astralchen/VAPView.git", from: "1.0.0")
 ],
 targets: [
     .target(
