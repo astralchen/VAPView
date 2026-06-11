@@ -47,14 +47,14 @@ final class VAPHWDRenderer {
         let layerSize = metalView.metalLayer.drawableSize
         rendererLog.debug("HWD: drawableSize=\(layerSize.width)x\(layerSize.height) bounds=\(metalView.bounds.width)x\(metalView.bounds.height)")
         guard let drawable = metalView.metalLayer.nextDrawable() else {
-            rendererLog.error("HWD: nextDrawable() returned nil")
+            rendererLog.debug("HWD: nextDrawable() returned nil")
             return
         }
 
         colorParams = vapColorParameters(from: pixelBuffer)
         let textures = vapMakeYUVTextures(from: pixelBuffer, device: device, textureCache: textureCache)
         guard textures.count == 2 else {
-            rendererLog.error("HWD: failed to create YUV textures, frame skipped")
+            rendererLog.debug("HWD: failed to create YUV textures, frame skipped")
             return
         }
 

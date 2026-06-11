@@ -168,7 +168,7 @@ public final class VAPPlayer {
 
     private func runPlayback(config: VAPPlayConfig, startFrame: Int = 0, epoch: Int) async {
         do {
-            playerLog.debug("runPlayback start filePath=\(config.filePath)")
+            playerLog.debug("runPlayback start source=\(Self.logSourceDescription(config.filePath))")
             // 1. Parse MP4 on background thread
             let info: VAPMP4Info = try await Task.detached(priority: .userInitiated) {
                 try VAPMP4Parser.parse(filePath: config.filePath)
@@ -287,7 +287,7 @@ public final class VAPPlayer {
                     }
                     guard let frame = decodedFrame else {
                         // Decoder stalled beyond one frame budget — skip to keep timing.
-                        playerLog.error("frame \(frameIndex) stalled — skipping")
+                        playerLog.debug("frame \(frameIndex) stalled; skipping")
                         frameIndex += 1
                         continue
                     }
@@ -340,14 +340,61 @@ public final class VAPPlayer {
             await decoder.invalidate()
 
         } catch let error as VAPError {
-            playerLog.error("VAPError: \(error)")
+            playerLog.error("VAPError: \(Self.logDescription(for: error))")
             emitEvent(.didFail(error), epoch: epoch)
         } catch {
             if !Task.isCancelled {
-                playerLog.error("Unknown error: \(error)")
+                playerLog.error("Unknown error: \(Self.logDescription(for: error))")
                 emitEvent(.didFail(.unknown(error.localizedDescription)), epoch: epoch)
             }
         }
+    }
+
+    private nonisolated static func logSourceDescription(_ filePath: String) -> String {
+        guard let url = URL(string: filePath), let scheme = url.scheme, !scheme.isEmpty else {
+            return "local-file"
+        }
+        switch scheme.lowercased() {
+        case "http", "https":
+            return "\(scheme)://\(url.host ?? "<unknown-host>")"
+        default:
+            return "\(scheme)://"
+        }
+    }
+
+    private nonisolated static func logDescription(for error: VAPError) -> String {
+        switch error {
+        case .fileNotFound:
+            return "fileNotFound(<redacted-path>)"
+        case .unsupportedURLScheme(let scheme):
+            return "unsupportedURLScheme(\(scheme))"
+        case .invalidMP4File:
+            return "invalidMP4File"
+        case .cannotGetStreamInfo:
+            return "cannotGetStreamInfo"
+        case .cannotGetStream:
+            return "cannotGetStream"
+        case .failedToCreateVTBDesc:
+            return "failedToCreateVTBDesc"
+        case .failedToCreateVTBSession:
+            return "failedToCreateVTBSession"
+        case .incompatibleVersion(let version):
+            return "incompatibleVersion(\(version))"
+        case .missingVAPConfig:
+            return "missingVAPConfig"
+        case .metalUnavailable:
+            return "metalUnavailable"
+        case .decodeFailed(let underlying):
+            let nsError = underlying as NSError
+            return "decodeFailed(domain=\(nsError.domain) code=\(nsError.code))"
+        case .unknown:
+            return "unknown"
+        }
+    }
+
+    private nonisolated static func logDescription(for error: any Error) -> String {
+        let nsError = error as NSError
+        return "domain=\(nsError.domain) code=\(nsError.code)"
     }
 
     private nonisolated static func startDecodeProducer(decoder: VAPVideoDecoder,
@@ -365,7 +412,7 @@ public final class VAPPlayer {
                 } catch is CancellationError {
                     return
                 } catch {
-                    decoderLog.error("decode producer failed index=\(index): \(error)")
+                    decoderLog.error("decode producer failed index=\(index): \(Self.logDescription(for: error))")
                     return
                 }
             }

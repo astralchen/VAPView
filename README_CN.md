@@ -164,6 +164,27 @@ case didFail(VAPError)                           // 发生错误
 
 ---
 
+## 日志
+
+VAPPlayer 默认使用 Apple unified logging。Release 构建默认只输出错误日志；如需更多信息，由宿主 App 显式配置。Debug 构建也可以通过 `VAP_DEBUG_LOGS=1` 环境变量开启 debug 日志。
+
+```swift
+VAPLogging.configure(
+    VAPLogConfiguration(
+        level: .info,
+        enabledModules: [.player, .decoder],
+        handler: { record in
+            // 如有需要，可将脱敏后的日志转发到业务日志系统。
+            print("[\(record.module.rawValue)] \(record.message)")
+        }
+    )
+)
+```
+
+设置 `level: .off` 可关闭 SDK 日志。日志内容默认会脱敏；只有在明确的本地调试场景下才建议传入 `redactSensitiveValues: false`。
+
+---
+
 ## 自定义资源加载器
 
 默认的 `VAPDiskCache` 以 URL 的 SHA-256 为文件名，将下载文件缓存至 `<Caches>/com.tencent.vap/resources/`。可替换为自定义的 `VAPResourceLoader` 实现：

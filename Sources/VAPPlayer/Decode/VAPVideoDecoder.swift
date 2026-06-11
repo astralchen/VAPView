@@ -226,7 +226,8 @@ actor VAPVideoDecoder {
             }
             raw = data
         } catch {
-            decoderLog.error("readSampleData: read error index=\(sample.index) \(error)")
+            let nsError = error as NSError
+            decoderLog.error("readSampleData: read error index=\(sample.index) domain=\(nsError.domain) code=\(nsError.code)")
             return nil
         }
         // MP4 sample data is already in AVCC (length-prefixed NAL unit) format.

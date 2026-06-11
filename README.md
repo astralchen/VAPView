@@ -164,6 +164,27 @@ case didFail(VAPError)
 
 ---
 
+## Logging
+
+VAPPlayer uses Apple's unified logging by default. Release builds log only errors unless the host app opts into a different level. Debug builds can also enable debug logs with the `VAP_DEBUG_LOGS=1` environment variable.
+
+```swift
+VAPLogging.configure(
+    VAPLogConfiguration(
+        level: .info,
+        enabledModules: [.player, .decoder],
+        handler: { record in
+            // Forward sanitized records to your own logger if needed.
+            print("[\(record.module.rawValue)] \(record.message)")
+        }
+    )
+)
+```
+
+Set `level: .off` to disable SDK logs. Messages are sanitized by default; pass `redactSensitiveValues: false` only for explicit local debugging sessions.
+
+---
+
 ## Custom Resource Loader
 
 The default `VAPDiskCache` downloads remote files to `<Caches>/com.tencent.vap/resources/`, keyed by SHA-256 of the URL. Replace it with your own `VAPResourceLoader` implementation:

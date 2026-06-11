@@ -107,7 +107,7 @@ final class VAPRenderer {
         colorParams = vapColorParameters(from: pixelBuffer)
         let textures = vapMakeYUVTextures(from: pixelBuffer, device: device, textureCache: textureCache)
         guard textures.count == 2 else {
-            rendererLog.error("VAP drawYUVBase: failed to create YUV textures, frame skipped")
+            rendererLog.debug("VAP drawYUVBase: failed to create YUV textures, frame skipped")
             return
         }
 

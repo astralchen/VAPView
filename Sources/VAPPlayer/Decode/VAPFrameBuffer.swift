@@ -51,16 +51,13 @@ actor VAPFrameBufferActor {
     }
 
     func popFrame(at targetIndex: Int) -> VAPDecodedFrame? {
-        while let frame = frames.first {
-            if frame.frameIndex == targetIndex {
-                return frames.removeFirst()
-            }
-            if frame.frameIndex > targetIndex {
-                return nil
-            }
-            frames.removeFirst()
+        guard let targetPosition = frames.firstIndex(where: { $0.frameIndex == targetIndex }) else {
+            return nil
         }
-        return nil
+        if targetPosition > 0 {
+            frames.removeFirst(targetPosition)
+        }
+        return frames.removeFirst()
     }
 
     func clear() {
