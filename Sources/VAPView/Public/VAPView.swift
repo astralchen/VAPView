@@ -2,45 +2,44 @@
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License: http://opensource.org/licenses/MIT
 //
-// Drop-in UIView replacement for QGVAPWrapView.
-// Embeds VAPMetalView and drives VAPPlayer internally.
+// QGVAPWrapView 的 UIView 替代实现。
+// 内部嵌入 VAPMetalView，并驱动 VAPPlayer 播放。
 
 import UIKit
 
 @MainActor
 public final class VAPView: UIView {
 
-    // MARK: - Public properties
+    // MARK: - 公开属性
 
-    /// Destroy the player automatically after playback finishes.
-    /// Defaults to false — keeps Metal objects alive for efficient reuse (e.g. in lists).
+    /// 播放完成后是否自动销毁播放器。
+    /// 默认值为 false；会保留 Metal 对象，方便列表等场景高效复用。
     public var automaticallyDestroysPlayerAfterPlayback: Bool = false
 
-    /// Override FPS (0 = use MP4 header value).
+    /// 覆盖播放帧率（0 表示使用 MP4 头信息中的值）。
     public var preferredFramesPerSecond: Int = 0
 
-    /// Mutes audio when true.
+    /// 为 true 时静音。
     public var isMuted: Bool = false {
         didSet { player?.setMuted(isMuted) }
     }
 
-    /// Called before playback starts. Return false to cancel playback.
+    /// 播放开始前调用；返回 false 可取消播放。
     public var shouldStartPlayback: ((VAPPlaybackConfiguration) -> Bool)?
 
-    /// Resource loader used to resolve remote HTTPS URLs to local file paths.
-    /// Defaults to `VAPDiskCache.shared`. Replace with a custom implementation to
-    /// control download and caching behaviour. Custom loaders may support other
-    /// schemes, but the default disk cache rejects plain HTTP URLs.
+    /// 用于将远程 HTTPS URL 解析为本地文件路径的资源加载器。
+    /// 默认值为 `VAPDiskCache.shared`。可以替换为自定义实现来控制下载和缓存行为。
+    /// 自定义加载器可以支持其他 scheme，但默认磁盘缓存会拒绝明文 HTTP URL。
     public var resourceLoader: VAPResourceLoader = VAPDiskCache.shared
 
-    // MARK: - Private
+    // MARK: - 私有状态
 
     private var player: VAPPlayer?
     private var playTask: Task<Void, Never>?
     private var playbackGeneration: Int = 0
     private var gestureHandlers: [(gesture: UIGestureRecognizer, handler: (UIGestureRecognizer) -> Void)] = []
 
-    // MARK: - Init
+    // MARK: - 初始化
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -50,10 +49,10 @@ public final class VAPView: UIView {
         super.init(coder: coder)
     }
 
-    // MARK: - Gesture API
+    // MARK: - 手势 API
 
-    /// Add a tap gesture on the Metal view. The handler fires on each tap.
-    /// The gesture persists across repeat cycles and is only removed when `teardown()` is called.
+    /// 在 Metal 视图上添加点击手势；每次点击都会触发处理闭包。
+    /// 手势会在重复播放周期中保留，只会在调用 `teardown()` 时移除。
     public func addTapGesture(_ handler: @escaping (UITapGestureRecognizer) -> Void) {
         let tap = UITapGestureRecognizer()
         addGesture(tap) { gesture in
@@ -62,24 +61,24 @@ public final class VAPView: UIView {
         }
     }
 
-    /// Add any UIGestureRecognizer on the Metal view.
-    /// The gesture persists across repeat cycles and is only removed when `teardown()` is called.
+    /// 在 Metal 视图上添加任意 UIGestureRecognizer。
+    /// 手势会在重复播放周期中保留，只会在调用 `teardown()` 时移除。
     public func addGesture(_ gesture: UIGestureRecognizer,
                            handler: @escaping (UIGestureRecognizer) -> Void) {
         gestureHandlers.append((gesture, handler))
         gesture.addTarget(self, action: #selector(handleGesture(_:)))
-        // Attach to metalView if already created, otherwise attached on next play.
+        // 如果 metalView 已创建则立即挂载，否则在下次播放时挂载。
         player?.metalView.addGestureRecognizer(gesture)
     }
 
-    /// Remove a previously registered gesture and detach it from the Metal view.
+    /// 移除已注册的手势，并从 Metal 视图上解除挂载。
     public func removeGesture(_ gesture: UIGestureRecognizer) {
         gestureHandlers.removeAll { $0.gesture === gesture }
         gesture.removeTarget(self, action: #selector(handleGesture(_:)))
         player?.metalView.removeGestureRecognizer(gesture)
     }
 
-    /// VAPView itself does not handle gestures — use addTapGesture / addGesture.
+    /// VAPView 自身不处理手势；请使用 addTapGesture / addGesture。
     @available(*, unavailable, message: "Use addTapGesture or addGesture(_:handler:) instead.")
     override public func addGestureRecognizer(_ gestureRecognizer: UIGestureRecognizer) {
         super.addGestureRecognizer(gestureRecognizer)
@@ -89,22 +88,18 @@ public final class VAPView: UIView {
         for (gesture, handler) in gestureHandlers where gesture === sender { handler(sender) }
     }
 
-    // MARK: - Public API
+    // MARK: - 公开 API
 
-    /// Asynchronously downloads and caches a VAP resource.
+    /// 异步下载并缓存 VAP 资源。
     ///
-    /// Use this method to warm the disk cache before creating a view. Concurrent
-    /// requests for the same URL through the same `VAPDiskCache` instance share a
-    /// single download, and each caller receives progress updates.
+    /// 可在创建视图前使用该方法预热磁盘缓存。通过同一个 `VAPDiskCache` 实例
+    /// 并发请求同一个 URL 时会共用一次下载，并且每个调用方都会收到进度更新。
     ///
     /// - Parameters:
-    ///   - source: The local file path or HTTPS URL of the resource. Local paths
-    ///     are returned unchanged.
-    ///   - resourceLoader: The object that resolves the source. The default value
-    ///     is `VAPDiskCache.shared`.
-    ///   - progressHandler: A closure the loader calls with progress values in the range
-    ///     `0...1`.
-    /// - Returns: A local file path suitable for playback.
+    ///   - source: 资源的本地文件路径或 HTTPS URL。本地路径会原样返回。
+    ///   - resourceLoader: 用于解析 source 的对象。默认值为 `VAPDiskCache.shared`。
+    ///   - progressHandler: 加载器回调的进度闭包，取值范围为 `0...1`。
+    /// - Returns: 可用于播放的本地文件路径。
     @discardableResult
     @concurrent public nonisolated static func prefetch(
         source: String,
@@ -115,33 +110,33 @@ public final class VAPView: UIView {
         return try await resourceLoader.resolveLocalPath(for: source, progressHandler: handler)
     }
 
-    /// Play a VAP/HWD animation file.
+    /// 播放 VAP/HWD 动画文件。
     ///
-    /// The renderer automatically selects the appropriate pipeline based on the MP4 content:
-    /// - **VAP path**: If the MP4 contains a `vapc` box, the renderer reads `rgbFrame`/`aFrame`
-    ///   from it to determine exact RGB and alpha regions. In this case `configuration.alphaPlacement` is ignored.
-    /// - **HWD path**: If no `vapc` box is present, the renderer uses `configuration.alphaPlacement` to
-    ///   determine the alpha channel position (left/right/top/bottom 50% split).
+    /// 渲染器会根据 MP4 内容自动选择合适的渲染管线：
+    /// - **VAP 路径**：如果 MP4 包含 `vapc` box，渲染器会读取其中的 `rgbFrame`/`aFrame`
+    ///   来确定精确的 RGB 和 Alpha 区域。此时会忽略 `configuration.alphaPlacement`。
+    /// - **HWD 路径**：如果没有 `vapc` box，渲染器使用 `configuration.alphaPlacement`
+    ///   判断 Alpha 通道位置（左/右/上/下 50% 分割）。
     ///
-    /// ## VAPPlaybackConfiguration properties
+    /// ## VAPPlaybackConfiguration 属性
     ///
-    /// | Property | Description |
+    /// | 属性 | 说明 |
     /// |---|---|
-    /// | `source` | Local file path or HTTPS URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. The default loader rejects plain HTTP URLs. |
-    /// | `alphaPlacement` | Alpha channel position (`.left`/`.right`/`.top`/`.bottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.right`. |
-    /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.ignore`. |
-    /// | `contentMode` | Display scaling: `.scaleToFill` (default), `.aspectFit`, or `.aspectFill`. |
-    /// | `attachmentSources` | Maps `srcId` -> ``VAPAttachmentSource`` (`.image`, `.imageURL`, `.text`) for VAP attachment slots defined in the `vapc` config. |
-    /// | `imageLoader` | Custom async image loader for `.imageURL` type attachments. Required when using `.imageURL` attachment sources. |
-    /// | `frameBufferCapacity` | Decoded frame buffer depth. Default: 3. |
-    /// | `preferredFramesPerSecond` | Override playback FPS. 0 (default) = use the value from MP4 header. |
-    /// | `playsAudio` | Whether to play the audio track if present. Default: `true`. |
-    /// | `mask` | Optional external alpha mask applied over every frame (VAP path only). |
-    /// | `loopCount` | Playback repeat count. 1 = once (default), 0 = infinite, N = N times. When `0`, `.didFinish` is never emitted — call `stop()` explicitly. |
+    /// | `source` | 本地文件路径或 HTTPS URL。远程 URL 会先通过 ``VAPDiskCache`` 下载，本地化进度通过 `.downloading` 事件上报。默认加载器会拒绝明文 HTTP URL。 |
+    /// | `alphaPlacement` | Alpha 通道位置（`.left`/`.right`/`.top`/`.bottom`）。**仅用于 HWD 路径**；当 MP4 的 `vapc` box 包含 `rgbFrame`/`aFrame` 时会被忽略。默认值：`.right`。 |
+    /// | `backgroundPolicy` | App 进入后台时的行为：`.stop`（默认）、`.pauseAndResume` 或 `.ignore`。 |
+    /// | `contentMode` | 显示缩放方式：`.scaleToFill`（默认）、`.aspectFit` 或 `.aspectFill`。 |
+    /// | `attachmentSources` | 将 `srcId` 映射到 ``VAPAttachmentSource``（`.image`、`.imageURL`、`.text`），用于 `vapc` 配置中的 VAP 挂件槽位。 |
+    /// | `imageLoader` | `.imageURL` 类型挂件的自定义异步图片加载器。使用 `.imageURL` 挂件资源时必填。 |
+    /// | `frameBufferCapacity` | 解码帧缓冲深度。默认值：3。 |
+    /// | `preferredFramesPerSecond` | 覆盖播放帧率。0（默认）表示使用 MP4 头信息中的值。 |
+    /// | `playsAudio` | 如果存在音轨，是否播放音频。默认值：`true`。 |
+    /// | `mask` | 可选的外部 Alpha 蒙版，会叠加到每一帧（仅 VAP 路径）。 |
+    /// | `loopCount` | 播放重复次数。1 = 播放一次（默认），0 = 无限循环，N = 播放 N 次。为 `0` 时不会发出 `.didFinish`，需要显式调用 `stop()`。 |
     ///
-    /// ## Examples
+    /// ## 示例
     ///
-    /// **Basic — play a local file (HWD path, alphaPlacement takes effect):**
+    /// **基础用法：播放本地文件（HWD 路径，alphaPlacement 生效）：**
     /// ```swift
     /// let playbackConfiguration = VAPPlaybackConfiguration(
     ///     source: Bundle.main.path(forResource: "animation", ofType: "mp4")!,
@@ -150,7 +145,7 @@ public final class VAPView: UIView {
     /// vapView.play(playbackConfiguration)
     /// ```
     ///
-    /// **Remote URL with progress and event handling:**
+    /// **远程 URL：带进度和事件处理：**
     /// ```swift
     /// let playbackConfiguration = VAPPlaybackConfiguration(
     ///     source: "https://example.com/gift.mp4",
@@ -161,24 +156,24 @@ public final class VAPView: UIView {
     /// vapView.play(playbackConfiguration) { event in
     ///     switch event {
     ///     case .downloading(let progress):
-    ///         print("downloading: \(Int(progress * 100))%")
+    ///         print("下载中：\(Int(progress * 100))%")
     ///     case .didStart:
-    ///         print("playback started")
+    ///         print("播放已开始")
     ///     case .didPlayFrame(let index):
-    ///         break // called every frame
+    ///         break // 每帧都会调用
     ///     case .didLoopFinish(let loop, let totalFrames):
-    ///         print("loop \(loop) done, \(totalFrames) frames")
+    ///         print("第 \(loop) 次循环完成，共 \(totalFrames) 帧")
     ///     case .didFinish(let totalFrames):
-    ///         print("finished, total frames: \(totalFrames)")
+    ///         print("播放完成，共 \(totalFrames) 帧")
     ///     case .didStop(let lastFrame):
-    ///         print("stopped at frame \(lastFrame)")
+    ///         print("已停止在第 \(lastFrame) 帧")
     ///     case .didFail(let error):
-    ///         print("error: \(error)")
+    ///         print("错误：\(error)")
     ///     }
     /// }
     /// ```
     ///
-    /// **VAP path with dynamic attachments (images, text overlays):**
+    /// **VAP 路径：动态挂件（图片、文本叠加）：**
     /// ```swift
     /// let playbackConfiguration = VAPPlaybackConfiguration(
     ///     source: "https://example.com/vapx_animation.mp4",
@@ -189,7 +184,7 @@ public final class VAPView: UIView {
     ///         "banner": .imageURL("https://example.com/banner.png"),
     ///     ],
     ///     imageLoader: { url, context in
-    ///         // Custom async image loading for .imageURL attachments
+    ///         // 为 .imageURL 挂件自定义异步图片加载
     ///         let (data, _) = try await URLSession.shared.data(from: url)
     ///         return UIImage(data: data) ?? UIImage()
     ///     }
@@ -197,9 +192,9 @@ public final class VAPView: UIView {
     /// vapView.play(playbackConfiguration)
     /// ```
     ///
-    /// **External mask overlay (VAP path only):**
+    /// **外部蒙版叠加（仅 VAP 路径）：**
     /// ```swift
-    /// let maskData = Data(repeating: 0xFF, count: 200 * 200) // R8 grayscale
+    /// let maskData = Data(repeating: 0xFF, count: 200 * 200) // R8 灰度
     /// let playbackConfiguration = VAPPlaybackConfiguration(
     ///     source: "path/to/animation.mp4",
     ///     mask: VAPMaskConfiguration(data: maskData, dataSize: CGSize(width: 200, height: 200))
@@ -208,8 +203,8 @@ public final class VAPView: UIView {
     /// ```
     ///
     /// - Parameters:
-    ///   - configuration: Full play configuration. See property table above.
-    ///   - eventHandler: Optional closure called for each ``VAPEvent``.
+    ///   - configuration: 完整播放配置。参见上方属性表。
+    ///   - eventHandler: 每个 ``VAPEvent`` 触发时调用的可选闭包。
     public func play(_ configuration: VAPPlaybackConfiguration,
                      eventHandler: ((VAPEvent) -> Void)? = nil) {
         var playbackConfiguration = configuration
@@ -217,10 +212,10 @@ public final class VAPView: UIView {
             ? preferredFramesPerSecond
             : configuration.preferredFramesPerSecond
 
-        // shouldStart gate
+        // shouldStartPlayback 播放门禁。
         if let shouldStartPlayback, !shouldStartPlayback(playbackConfiguration) { return }
 
-        // Stop any existing playback but keep player/metalView alive for reuse.
+        // 停止已有播放，但保留 player/metalView 以便复用。
         playbackGeneration &+= 1
         let generation = playbackGeneration
         playTask?.cancel()
@@ -230,7 +225,7 @@ public final class VAPView: UIView {
         ensurePlayer()
         guard let p = player else { return }
 
-        // Wrap caller's eventHandler to handle automatic teardown internally.
+        // 包装调用方的 eventHandler，用于在内部处理自动销毁。
         let wrappedEventHandler: ((VAPEvent) -> Void)? = { [weak self] event in
             guard let self, self.playbackGeneration == generation else { return }
             eventHandler?(event)
@@ -271,7 +266,7 @@ public final class VAPView: UIView {
         }
     }
 
-    /// Convenience overload accepting individual parameters.
+    /// 接收独立参数的便利重载。
     public func play(source: String,
                      alphaPlacement: VAPAlphaPlacement = .right,
                      backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
@@ -317,14 +312,14 @@ public final class VAPView: UIView {
         player?.resume()
     }
 
-    // MARK: - Layout
+    // MARK: - 布局
 
     public override func layoutSubviews() {
         super.layoutSubviews()
         player?.metalView.frame = bounds
     }
 
-    // MARK: - Private
+    // MARK: - 私有方法
 
     private func ensurePlayer() {
         guard player == nil else { return }
@@ -332,7 +327,7 @@ public final class VAPView: UIView {
         p.metalView.frame = bounds
         p.metalView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(p.metalView)
-        // Attach any pre-registered gestures to the new metalView.
+        // 将预先注册的手势挂载到新的 metalView。
         for (gesture, _) in gestureHandlers {
             p.metalView.addGestureRecognizer(gesture)
         }
@@ -342,7 +337,7 @@ public final class VAPView: UIView {
     private func teardown() {
         playTask?.cancel()
         playTask = nil
-        // Remove gestures before removing metalView so they can be re-attached later.
+        // 移除 metalView 前先解除手势，便于后续重新挂载。
         if let metalView = player?.metalView {
             for (gesture, _) in gestureHandlers { metalView.removeGestureRecognizer(gesture) }
             metalView.removeFromSuperview()

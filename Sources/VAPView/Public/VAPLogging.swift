@@ -4,11 +4,10 @@
 
 import Foundation
 
-/// Runtime log verbosity for VAPPlayer.
+/// VAPPlayer 的运行时日志级别。
 ///
-/// The default configuration logs only errors in production. Debug logs are
-/// available when explicitly configured, or in Debug builds when the
-/// `VAP_DEBUG_LOGS=1` environment variable is present.
+/// 默认配置在生产环境只输出错误日志。可以通过显式配置开启 debug 日志；
+/// Debug 构建下也可以通过 `VAP_DEBUG_LOGS=1` 环境变量开启。
 public enum VAPLogLevel: Int, Comparable, Sendable {
     case off = 0
     case error = 1
@@ -20,7 +19,7 @@ public enum VAPLogLevel: Int, Comparable, Sendable {
     }
 }
 
-/// Logical logger categories used by VAPPlayer internals.
+/// VAPPlayer 内部使用的逻辑日志分类。
 public enum VAPLogModule: String, CaseIterable, Hashable, Sendable {
     case common = "VAPCommon"
     case decoder = "VAPDecoder"
@@ -30,7 +29,7 @@ public enum VAPLogModule: String, CaseIterable, Hashable, Sendable {
     case player = "VAPPlayer"
 }
 
-/// A sanitized log event delivered to a custom handler.
+/// 传递给自定义处理器的脱敏日志事件。
 public struct VAPLogRecord: Sendable {
     public let level: VAPLogLevel
     public let module: VAPLogModule
@@ -54,7 +53,7 @@ public struct VAPLogRecord: Sendable {
     }
 }
 
-/// Global logging configuration for VAPPlayer.
+/// VAPPlayer 的全局日志配置。
 public struct VAPLogConfiguration: Sendable {
     public var level: VAPLogLevel
     public var enabledModules: Set<VAPLogModule>?
@@ -91,7 +90,7 @@ public struct VAPLogConfiguration: Sendable {
     }
 }
 
-/// Public entry point for configuring VAPPlayer logging.
+/// 配置 VAPPlayer 日志的公开入口。
 public enum VAPLogging {
     public static func configure(_ configuration: VAPLogConfiguration) {
         VAPLogState.shared.configure(configuration)

@@ -7,7 +7,7 @@ import UIKit
 @Suite("VAPTypes")
 struct VAPTypesTests {
 
-    // MARK: - VAPAlphaPlacement
+    // MARK: - Alpha 位置
 
     @Test func alphaPlacementRawValues() {
         #expect(VAPAlphaPlacement.left.rawValue == 0)
@@ -16,7 +16,7 @@ struct VAPTypesTests {
         #expect(VAPAlphaPlacement.bottom.rawValue == 3)
     }
 
-    // MARK: - VAPError
+    // MARK: - 错误类型
 
     @Test func errorFileNotFound() {
         let e = VAPError.fileNotFound("/some/path.mp4")
@@ -37,7 +37,7 @@ struct VAPTypesTests {
         #expect((inner as NSError).code == 42)
     }
 
-    // MARK: - VAPPlaybackDefaults
+    // MARK: - 播放默认值
 
     @Test func playbackDefaults() {
         #expect(VAPPlaybackDefaults.defaultFramesPerSecond == 25)
@@ -76,7 +76,7 @@ struct VAPTypesTests {
         #expect(configuration.loopCount == 3)
     }
 
-    // MARK: - VAPEvent
+    // MARK: - 播放事件
 
     @Test func eventDidPlayFrame() {
         let event = VAPEvent.didPlayFrame(index: 5)
@@ -115,7 +115,7 @@ struct VAPTypesTests {
         #expect(p == 0.75)
     }
 
-    // MARK: - VAPAttachmentSource
+    // MARK: - 挂件资源
 
     @Test func attachmentSourceImage() {
         let img = UIImage()
@@ -139,7 +139,7 @@ struct VAPTypesTests {
         #expect(t == "Hello")
     }
 
-    // MARK: - VAPMaskConfiguration
+    // MARK: - 蒙版配置
 
     @Test func maskConfigurationDefaults() {
         let data = Data([0, 1, 0, 1])
@@ -150,7 +150,7 @@ struct VAPTypesTests {
         #expect(mask.blurLength == 0)
     }
 
-    // MARK: - VAPAttachmentImageContext
+    // MARK: - 挂件图片上下文
 
     @Test func attachmentImageContextFields() {
         let context = VAPAttachmentImageContext(

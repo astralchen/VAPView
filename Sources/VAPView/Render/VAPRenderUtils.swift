@@ -2,15 +2,15 @@
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License: http://opensource.org/licenses/MIT
 //
-// Shared utilities for VAPRenderer and VAPHWDRenderer.
+// VAPRenderer 和 VAPHWDRenderer 共用的工具方法。
 
 import Metal
 import CoreVideo
 
-// MARK: - RGB display size
+// MARK: - RGB 显示尺寸
 
-/// Computes the visible RGB content size based on alpha placement.
-/// For left/right split the width is halved; for top/bottom the height is halved.
+/// 根据 alphaPlacement 计算可见 RGB 内容尺寸。
+/// 左/右分割时宽度减半；上/下分割时高度减半。
 func rgbContentSize(alphaPlacement: VAPAlphaPlacement,
                     videoWidth: Int,
                     videoHeight: Int) -> CGSize {
@@ -22,10 +22,10 @@ func rgbContentSize(alphaPlacement: VAPAlphaPlacement,
     }
 }
 
-// MARK: - YUV color parameters from pixel buffer
+// MARK: - 从像素缓冲区获取 YUV 颜色参数
 
-/// Detects YCbCr matrix and pixel format range from a decoded pixel buffer
-/// and returns the matching pre-computed color parameters.
+/// 从已解码的像素缓冲区检测 YCbCr 矩阵和像素格式范围，
+/// 并返回匹配的预计算颜色参数。
 func vapColorParameters(from pixelBuffer: CVPixelBuffer) -> VAPColorParameters {
     let matrix = CVBufferGetAttachment(pixelBuffer, kCVImageBufferYCbCrMatrixKey, nil)?
         .takeUnretainedValue() as? String
@@ -41,11 +41,11 @@ func vapColorParameters(from pixelBuffer: CVPixelBuffer) -> VAPColorParameters {
     }
 }
 
-// MARK: - YUV texture creation from NV12 CVPixelBuffer
+// MARK: - 从 NV12 CVPixelBuffer 创建 YUV 纹理
 
-/// Creates Metal textures for the Y and UV planes of an NV12 pixel buffer.
-/// Uses the fast `CVMetalTextureCache` path on real devices and falls back to
-/// CPU copy on the simulator where pixel buffers are not IOSurface-backed.
+/// 为 NV12 像素缓冲区的 Y 和 UV 平面创建 Metal 纹理。
+/// 真机上使用较快的 `CVMetalTextureCache` 路径；模拟器上如果像素缓冲区
+/// 不是 IOSurface 后备存储，则回退到 CPU 拷贝。
 func vapMakeYUVTextures(from pixelBuffer: CVPixelBuffer,
                         device: MTLDevice,
                         textureCache: CVMetalTextureCache?) -> [MTLTexture] {
@@ -54,7 +54,7 @@ func vapMakeYUVTextures(from pixelBuffer: CVPixelBuffer,
     let uvWidth  = CVPixelBufferGetWidthOfPlane(pixelBuffer, 1)
     let uvHeight = CVPixelBufferGetHeightOfPlane(pixelBuffer, 1)
 
-    // Fast path: IOSurface-backed buffer (real device)
+    // 快路径：IOSurface 后备缓冲区（真机）。
     if let cache = textureCache {
         CVMetalTextureCacheFlush(cache, 0)
         func make(_ plane: Int, _ w: Int, _ h: Int, _ fmt: MTLPixelFormat) -> MTLTexture? {
@@ -70,7 +70,7 @@ func vapMakeYUVTextures(from pixelBuffer: CVPixelBuffer,
         }
     }
 
-    // Slow path: CPU copy for simulator (pixel buffers not IOSurface-backed)
+    // 慢路径：模拟器 CPU 拷贝（像素缓冲区不是 IOSurface 后备存储）。
     CVPixelBufferLockBaseAddress(pixelBuffer, .readOnly)
     defer { CVPixelBufferUnlockBaseAddress(pixelBuffer, .readOnly) }
 

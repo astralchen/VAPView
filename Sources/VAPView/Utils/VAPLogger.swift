@@ -135,7 +135,7 @@ private enum VAPLogSanitizer {
     }
 }
 
-// Module-level singletons
+// 模块级单例
 
 let vapLog = VAPLogger(module: .common)
 

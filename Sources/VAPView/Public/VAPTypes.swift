@@ -4,7 +4,7 @@
 
 import UIKit
 
-// MARK: - Alpha placement in video frame
+// MARK: - 视频帧内的 Alpha 位置
 public enum VAPAlphaPlacement: Int, Sendable {
     case left = 0
     case right = 1
@@ -12,24 +12,24 @@ public enum VAPAlphaPlacement: Int, Sendable {
     case bottom = 3
 }
 
-// MARK: - Background behaviour
+// MARK: - 后台播放策略
 public enum VAPBackgroundPlaybackPolicy: Sendable {
-    /// Stop playback when app enters background
+    /// 进入后台时停止播放。
     case stop
-    /// Pause on background, resume on foreground (requires key-frame seek on resume)
+    /// 进入后台时暂停，回到前台后恢复播放（恢复时需要关键帧 seek）。
     case pauseAndResume
-    /// Do nothing; caller manages pause/resume
+    /// 不自动处理；由调用方管理暂停和恢复。
     case ignore
 }
 
-// MARK: - Content mode
+// MARK: - 内容显示模式
 public enum VAPContentMode: Sendable {
     case scaleToFill
     case aspectFit
     case aspectFill
 }
 
-// MARK: - Attachment image options
+// MARK: - 挂件图片选项
 public enum VAPAttachmentImageContentMode: Sendable {
     case scaleToFill
     case centerFill
@@ -40,7 +40,7 @@ public enum VAPAttachmentLoadLocation: Sendable {
     case remote
 }
 
-// MARK: - Error codes
+// MARK: - 错误码
 public enum VAPError: Error, Sendable {
     case fileNotFound(String)
     /// URL scheme 不被允许（例如拒绝明文 http://）
@@ -57,7 +57,7 @@ public enum VAPError: Error, Sendable {
     case unknown(String)
 }
 
-// MARK: - Playback defaults
+// MARK: - 播放默认值
 public struct VAPPlaybackDefaults: Sendable {
     public static let defaultFramesPerSecond: Int = 25
     public static let minimumFramesPerSecond: Int = 1
@@ -67,20 +67,20 @@ public struct VAPPlaybackDefaults: Sendable {
     private init() {}
 }
 
-// MARK: - External mask overlay
+// MARK: - 外部蒙版叠加
 ///
-/// Supplies raw 0/1 byte-per-pixel mask data that gets
-/// uploaded as an R8Unorm Metal texture and composited over every rendered frame.
-/// Only effective on the VAP (attachment) renderer path.
+/// 提供每像素 0/1 字节的原始蒙版数据。
+/// 数据会上传为 R8Unorm Metal 纹理，并叠加到每一帧渲染结果上。
+/// 仅在 VAP（挂件）渲染路径生效。
 public struct VAPMaskConfiguration: Sendable {
-    /// Raw mask bytes — one byte per pixel, value 0 (transparent) or 1 (opaque).
-    /// Row-major, top-to-bottom. Must contain at least `dataSize.width * dataSize.height` bytes.
+    /// 原始蒙版字节；每像素一个字节，取值 0（透明）或 1（不透明）。
+    /// 按行优先、从上到下排列，至少需要包含 `dataSize.width * dataSize.height` 个字节。
     public let data: Data
-    /// Pixel dimensions of `data`.
+    /// `data` 对应的像素尺寸。
     public let dataSize: CGSize
-    /// Sampling region within `data` (same pixel units). Use `.zero` to sample the whole texture.
+    /// `data` 内的采样区域（同样使用像素单位）。传 `.zero` 表示采样整张纹理。
     public let sampleRect: CGRect
-    /// Edge-blur radius in pixels (0 = no blur, not yet implemented — reserved for future use).
+    /// 边缘模糊半径，单位为像素（0 表示不模糊；当前暂未实现，预留给后续能力）。
     public let blurLength: Int
 
     public init(data: Data,
@@ -94,29 +94,29 @@ public struct VAPMaskConfiguration: Sendable {
     }
 }
 
-// MARK: - Attachment source value
+// MARK: - 挂件资源值
 
-/// Typed value for a single attachment slot in `VAPPlaybackConfiguration.attachmentSources`.
-/// Replaces the untyped `[String: any Sendable]` dictionary values.
+/// `VAPPlaybackConfiguration.attachmentSources` 中单个挂件槽位的强类型值。
+/// 用于替代无类型的 `[String: any Sendable]` 字典值。
 public enum VAPAttachmentSource: @unchecked Sendable {
-    /// A pre-loaded image — composited directly without calling the imageLoader.
+    /// 已加载的图片；直接参与合成，不会调用 imageLoader。
     case image(UIImage)
-    /// A URL string (local path or network URL) — passed to the imageLoader for loading.
+    /// URL 字符串（本地路径或网络 URL）；会传给 imageLoader 加载。
     case imageURL(String)
-    /// A plain text string — rendered to a texture using the slot's font/color settings.
+    /// 纯文本；使用槽位中的字体和颜色配置渲染成纹理。
     case text(String)
 }
 
-// MARK: - Image loader context
-/// Describes the attachment slot that triggered an image load request.
+// MARK: - 图片加载上下文
+/// 描述触发图片加载请求的挂件槽位。
 public struct VAPAttachmentImageContext: Sendable {
-    /// The attachment identifier from the vapc config (`srcId`).
+    /// vapc 配置中的挂件标识（`srcId`）。
     public let sourceID: String
-    /// How the loaded image should be fitted into its destination rect.
+    /// 加载后的图片在目标区域内的填充方式。
     public let contentMode: VAPAttachmentImageContentMode
-    /// The destination size in canvas points (nil when not specified in config).
+    /// 画布坐标系中的目标尺寸；配置未指定时为 nil。
     public let targetSize: CGSize?
-    /// Whether the URL should be loaded from the network or local storage.
+    /// URL 应从网络还是本地存储加载。
     public let loadLocation: VAPAttachmentLoadLocation?
 
     public init(sourceID: String,
@@ -130,6 +130,6 @@ public struct VAPAttachmentImageContext: Sendable {
     }
 }
 
-// MARK: - Image loader injection (replaces delegate-based loading)
+// MARK: - 图片加载注入（替代代理式加载）
 public typealias VAPAttachmentImageLoader =
     @Sendable (_ url: URL, _ context: VAPAttachmentImageContext) async throws -> UIImage

@@ -93,7 +93,7 @@ final class ViewController: UIViewController {
     private let stopButton = UIButton(type: .system)
     private let clearCacheButton = UIButton(type: .system)
 
-    // MARK: - Lifecycle
+    // MARK: - 生命周期
 
     override func viewDidLoad() {
         super.viewDidLoad()
@@ -111,7 +111,7 @@ final class ViewController: UIViewController {
         collectionView.collectionViewLayout.invalidateLayout()
     }
 
-    // MARK: - Setup
+    // MARK: - 界面搭建
 
     private func configureButtons() {
         makeButton(playLeftButton, title: "Alpha Left", color: .systemBlue)
@@ -208,7 +208,7 @@ final class ViewController: UIViewController {
         }
     }
 
-    // MARK: - Actions
+    // MARK: - 操作
 
     @objc private func playLeftTapped() {
         selectedAlphaPlacement = .left

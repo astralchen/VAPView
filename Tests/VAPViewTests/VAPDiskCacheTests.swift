@@ -4,7 +4,7 @@ import Foundation
 import CryptoKit
 @testable import VAPView
 
-// MARK: - Mock URLProtocol
+// MARK: - 模拟 URLProtocol
 
 nonisolated(unsafe) private var mockResponseData: Data = Data()
 nonisolated(unsafe) private var mockShouldFail: Bool = false
@@ -110,7 +110,7 @@ final class VAPDelayedURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
-// MARK: - Helper
+// MARK: - 辅助方法
 
 private func makeMockCache(tmpDir: URL) -> VAPDiskCache {
     let config = URLSessionConfiguration.ephemeral
@@ -142,9 +142,9 @@ private func waitUntil(
     }
 }
 
-// MARK: - VAPDiskCacheTests
+// MARK: - VAPDiskCache 测试
 
-// MARK: - Real network integration test
+// MARK: - 真实网络集成测试
 
 @Suite("VAPDiskCache_Network", .serialized)
 struct VAPDiskCacheNetworkTests {
@@ -169,7 +169,7 @@ struct VAPDiskCacheNetworkTests {
         let dir = tmpCacheDir()
         let cache = VAPDiskCache(configuration: .default, cacheDirectory: dir)
         let first = try await cache.resolveLocalPath(for: Self.realURL, progressHandler: { _ in })
-        // Second call — file already on disk, no network request needed
+        // 第二次调用时文件已在磁盘上，不需要再次请求网络。
         let second = try await cache.resolveLocalPath(for: Self.realURL, progressHandler: { _ in })
         #expect(first == second)
     }
@@ -178,7 +178,7 @@ struct VAPDiskCacheNetworkTests {
 @Suite("VAPDiskCache", .serialized)
 struct VAPDiskCacheTests {
 
-    // MARK: Local path passthrough
+    // MARK: - 本地路径透传
 
     @Test func localSourceReturnedUnchanged() async throws {
         let dir = tmpCacheDir()
@@ -188,19 +188,19 @@ struct VAPDiskCacheTests {
         #expect(result == path)
     }
 
-    // MARK: Invalid URL
+    // MARK: - 无效 URL
 
     @Test func invalidURLThrows() async throws {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
-        // String that starts with http:// but is not a valid URL
+        // 以 http:// 开头但不是合法 URL 的字符串。
         let bad = "http://[invalid url]"
         await #expect(throws: VAPError.self) {
             _ = try await cache.resolveLocalPath(for: bad, progressHandler: { _ in })
         }
     }
 
-    // MARK: Download success
+    // MARK: - 下载成功
 
     @Test func downloadWritesFileToDisk() async throws {
         mockShouldFail = false
@@ -213,7 +213,7 @@ struct VAPDiskCacheTests {
         #expect(localPath.hasSuffix(".mp4"))
     }
 
-    // MARK: Cache hit
+    // MARK: - 缓存命中
 
     @Test func cacheHitReturnsSamePathWithoutRedownload() async throws {
         mockShouldFail = false
@@ -222,7 +222,7 @@ struct VAPDiskCacheTests {
         let cache = makeMockCache(tmpDir: dir)
         let url = "https://example.com/cached.mp4"
         let first  = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
-        // Replace mock data — second call must NOT download again
+        // 替换模拟数据；第二次调用不得再次下载。
         mockResponseData = Data("new data".utf8)
         let second = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
         #expect(first == second)
@@ -268,7 +268,7 @@ struct VAPDiskCacheTests {
         #expect(secondProgress.last == 1.0)
     }
 
-    // MARK: Progress handler
+    // MARK: - 进度回调
 
     @Test @MainActor func progressCallbackFired() async throws {
         mockShouldFail = false
@@ -279,11 +279,11 @@ struct VAPDiskCacheTests {
         _ = try await cache.resolveLocalPath(for: "https://example.com/progress.mp4") { p in
             lastProgress = p
         }
-        // Final progress must be 1.0 (set by didFinishDownloadingTo)
+        // 最终进度必须为 1.0（由 didFinishDownloadingTo 设置）。
         #expect(lastProgress == 1.0)
     }
 
-    // MARK: Download failure
+    // MARK: - 下载失败
 
     @Test func downloadFailurePropagatesError() async throws {
         mockShouldFail = true
@@ -298,7 +298,7 @@ struct VAPDiskCacheTests {
         #expect(threw)
     }
 
-    // MARK: removeAllCachedResources
+    // MARK: - 清理缓存资源
 
     @Test func removeAllCachedResourcesRemovesFiles() async throws {
         mockShouldFail = false

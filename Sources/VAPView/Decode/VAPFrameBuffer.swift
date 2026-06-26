@@ -5,15 +5,15 @@
 import CoreVideo
 import Foundation
 
-// MARK: - Decoded frame
+// MARK: - 已解码帧
 
 struct VAPDecodedFrame: @unchecked Sendable {
     let pixelBuffer: CVPixelBuffer
     var frameIndex: Int
-    var pts: Double   // seconds
+    var pts: Double   // 秒
 }
 
-// MARK: - Thread-safe FIFO buffer
+// MARK: - 线程安全 FIFO 缓冲区
 
 actor VAPFrameBufferActor {
     private var frames: [VAPDecodedFrame] = []

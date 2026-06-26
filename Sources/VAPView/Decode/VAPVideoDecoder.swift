@@ -7,7 +7,7 @@ import CoreMedia
 import CoreVideo
 import Foundation
 
-// MARK: - Decoder actor
+// MARK: - 解码器 actor
 
 actor VAPVideoDecoder {
 
@@ -23,13 +23,13 @@ actor VAPVideoDecoder {
         self.fileHandle = FileHandle(forReadingAtPath: info.localFilePath)
     }
 
-    /// Must be called immediately after init before any decode calls.
+    /// 初始化后、任何解码调用前必须立即调用。
     func prepare() throws {
         try setupFormatDescription()
         try setupDecompressionSession()
     }
 
-    // MARK: - Setup
+    // MARK: - 配置
 
     private func setupFormatDescription() throws {
         switch info.codec {
@@ -54,7 +54,7 @@ actor VAPVideoDecoder {
         if #available(iOS 17.0, *) {
             decoderSpec[kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder] = true
         }
-        // Must specify NV12 output — the renderer expects exactly 2 planes.
+        // 必须指定 NV12 输出；渲染器期望刚好 2 个平面。
         let imageAttrs: [CFString: Any] = [
             kCVPixelBufferPixelFormatTypeKey: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
         ]
@@ -73,9 +73,9 @@ actor VAPVideoDecoder {
         self.session = session
     }
 
-    // MARK: - Decode
+    // MARK: - 解码
 
-    /// Decode the sample at `index` and push the result into the frame buffer.
+    /// 解码 `index` 对应的采样，并将结果推入帧缓冲。
     func decodeFrame(at index: Int) async throws {
         guard index < info.videoSamples.count else { return }
         let sample = info.videoSamples[index]
@@ -116,9 +116,9 @@ actor VAPVideoDecoder {
                             attachmentMode: kCMAttachmentMode_ShouldPropagate)
         }
 
-        // Decode using VT output handler + checked continuation.
-        // CVPixelBuffer is a CFTypeRef and is safe to pass across isolation boundaries;
-        // we wrap it in a Sendable box to satisfy Swift 6.
+        // 使用 VT 输出回调 + checked continuation 解码。
+        // CVPixelBuffer 是 CFTypeRef，跨隔离边界传递 retain/release 是安全的；
+        // 这里用 Sendable 包装来满足 Swift 6 要求。
         var flags = VTDecodeInfoFlags()
         let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
         let pixelBuffer: CVPixelBuffer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CVPixelBuffer, any Error>) in
@@ -190,9 +190,9 @@ actor VAPVideoDecoder {
         }
     }
 
-    /// Reset the decoder for a new loop cycle.
-    /// Clears the frame buffer and recreates the VTDecompressionSession,
-    /// reusing the existing formatDesc and fileHandle.
+    /// 为新的循环周期重置解码器。
+    /// 清空帧缓冲并重建 VTDecompressionSession，
+    /// 同时复用已有的 formatDesc 和 fileHandle。
     func reset() async throws {
         await buffer.clear()
         if let session { VTDecompressionSessionInvalidate(session) }
@@ -209,7 +209,7 @@ actor VAPVideoDecoder {
         fileHandle = nil
     }
 
-    // MARK: - Private
+    // MARK: - 私有方法
 
     private func readSampleData(sample: VAPMP4Sample) throws -> CMBlockBuffer? {
         guard let fh = fileHandle else {
@@ -230,7 +230,7 @@ actor VAPVideoDecoder {
             decoderLog.error("readSampleData: read error index=\(sample.index) domain=\(nsError.domain) code=\(nsError.code)")
             return nil
         }
-        // MP4 sample data is already in AVCC (length-prefixed NAL unit) format.
+        // MP4 采样数据已经是 AVCC（长度前缀 NAL 单元）格式。
         let avccData = raw
         decoderLog.debug("readSampleData: avccData.count=\(avccData.count) index=\(sample.index)")
         var blockBuffer: CMBlockBuffer?
@@ -323,16 +323,16 @@ actor VAPVideoDecoder {
     }
 }
 
-// MARK: - Sendable wrapper for CVPixelBuffer
+// MARK: - CVPixelBuffer 的 Sendable 包装
 
-/// CVPixelBuffer is a CFTypeRef (thread-safe retain/release) but not formally Sendable in Swift 6.
-/// This wrapper lets us shuttle it across the continuation boundary.
+/// CVPixelBuffer 是 CFTypeRef（retain/release 线程安全），但在 Swift 6 中并未正式标记为 Sendable。
+/// 该包装用于让它跨 continuation 边界传递。
 private struct SendableCVPixelBuffer: @unchecked Sendable {
     let value: CVPixelBuffer
     init(_ pb: CVPixelBuffer) { self.value = pb }
 }
 
-// MARK: - Continuation helper (reference type for Unmanaged)
+// MARK: - Continuation 辅助类型（供 Unmanaged 使用的引用类型）
 
 private final class DecodeContinuationBox: @unchecked Sendable {
     let continuation: CheckedContinuation<CVPixelBuffer, any Error>

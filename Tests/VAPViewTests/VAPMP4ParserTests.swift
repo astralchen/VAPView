@@ -6,7 +6,7 @@ import Foundation
 @Suite("VAPMP4Parser")
 struct VAPMP4ParserTests {
 
-    // MARK: - Byte utilities
+    // MARK: - 字节工具
 
     @Test func readU32BE_basic() {
         let data = Data([0x01, 0x02, 0x03, 0x04])
@@ -33,7 +33,7 @@ struct VAPMP4ParserTests {
         #expect(VAPMP4Parser.readU16BE(data, offset: 0) == 0x1234)
     }
 
-    // MARK: - Box tree helpers
+    // MARK: - Box 树辅助方法
 
     @Test func boxFirstChild_found() {
         let child1 = VAPMP4Box(type: "mdhd", payload: .unknown)
@@ -66,7 +66,7 @@ struct VAPMP4ParserTests {
         #expect(trak.bfsFirst(type: "moov") == nil)
     }
 
-    // MARK: - Payload pattern matching
+    // MARK: - 载荷模式匹配
 
     @Test func mvhdPayload() {
         let box = VAPMP4Box(type: "mvhd", payload: .mvhd(timeScale: 1000, duration: 50000))
@@ -116,12 +116,12 @@ struct VAPMP4ParserTests {
         #expect(indices == [0, 3, 1, 2])
     }
 
-    // Verify that vapc at top level (outside moov) is found
+    // 验证能找到顶层（moov 外部）的 vapc。
     @Test func topLevelVapcIsFound() {
-        // Build a minimal MP4 with vapc outside moov
+        // 构造一个 vapc 位于 moov 外部的最小 MP4。
         var data = Data()
 
-        // ftyp box (minimal)
+        // ftyp box（最小结构）
         let ftyp = Data([
             0x00, 0x00, 0x00, 0x14,  // size = 20
             0x66, 0x74, 0x79, 0x70,  // "ftyp"
@@ -131,9 +131,9 @@ struct VAPMP4ParserTests {
         ])
         data.append(ftyp)
 
-        // Empty moov box (no vapc inside)
+        // 空 moov box（内部没有 vapc）。
         let moovBody = Data([
-            // mvhd (minimal, version 0, 96 bytes after header)
+            // mvhd（最小结构，版本 0，header 后 96 字节）。
             0x00, 0x00, 0x00, 0x6C, // size = 108
             0x6D, 0x76, 0x68, 0x64, // "mvhd"
         ] + [UInt8](repeating: 0, count: 100))
@@ -144,7 +144,7 @@ struct VAPMP4ParserTests {
         data.append(moovHeader)
         data.append(moovBody)
 
-        // vapc box at top level (outside moov)
+        // 顶层 vapc box（位于 moov 外部）。
         let vapcJSON = Data(#"{"info":{"v":2,"w":750,"h":1334,"fps":30,"videoW":1136,"videoH":1344,"orien":0,"rgbFrame":[0,0,750,1334],"aFrame":[754,0,375,667]}}"#.utf8)
         let vapcSize = UInt32(vapcJSON.count + 8)
         var vapcBox = Data()
@@ -153,29 +153,27 @@ struct VAPMP4ParserTests {
         vapcBox.append(vapcJSON)
         data.append(vapcBox)
 
-        // Write to temp file and parse
+        // 写入临时文件并解析。
         let tmpPath = NSTemporaryDirectory() + "test_toplevel_vapc.mp4"
         try! data.write(to: URL(fileURLWithPath: tmpPath))
         defer { try? FileManager.default.removeItem(atPath: tmpPath) }
 
-        // Parser will fail to find video track, but we can check vapcJSON
-        // by trying to parse and catching the error, then checking the box structure
-        // Instead, let's test the box parsing directly
+        // 完整解析会因为找不到视频轨而失败；这里直接解析 box 结构来检查 vapcJSON。
         let handle = FileHandle(forReadingAtPath: tmpPath)!
         defer { try? handle.close() }
         let boxes = try! VAPMP4Parser.parseBoxes(handle: handle, offset: 0, length: nil)
 
-        // Verify vapc is a top-level box
+        // 验证 vapc 是顶层 box。
         let vapc = boxes.first(where: { $0.type == "vapc" })
         #expect(vapc != nil, "vapc should be found at top level")
 
-        // Verify it's NOT inside moov
+        // 验证它不在 moov 内部。
         let moov = boxes.first(where: { $0.type == "moov" })
         #expect(moov != nil)
         let vapcInMoov = moov?.bfsFirst(type: "vapc")
         #expect(vapcInMoov == nil, "vapc should NOT be inside moov")
 
-        // Verify payload
+        // 验证载荷。
         if let vapc, case .vapc(let jsonData) = vapc.payload {
             let decoded = try! JSONDecoder().decode(VAPConfig.self, from: jsonData)
             #expect(decoded.info.w == 750)

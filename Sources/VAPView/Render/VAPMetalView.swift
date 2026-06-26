@@ -6,19 +6,19 @@ import UIKit
 import Metal
 import CoreVideo
 
-/// Lightweight UIView that exposes a CAMetalLayer for rendering.
-/// All Metal commands are submitted externally by VAPHWDRenderer / VAPRenderer.
+/// 暴露 CAMetalLayer 用于渲染的轻量 UIView。
+/// 所有 Metal 命令都由外部的 VAPHWDRenderer / VAPRenderer 提交。
 @MainActor
 public final class VAPMetalView: UIView {
 
-    // MARK: - Public
+    // MARK: - 公开属性
 
     public var renderContentMode: VAPContentMode = .scaleToFill
 
-    /// The underlying CAMetalLayer.
+    /// 底层 CAMetalLayer。
     public var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
 
-    // MARK: - Init
+    // MARK: - 初始化
 
     public override init(frame: CGRect) {
         super.init(frame: frame)
@@ -30,7 +30,7 @@ public final class VAPMetalView: UIView {
         setup()
     }
 
-    // MARK: - UIView overrides
+    // MARK: - UIView 重写
 
     public override class var layerClass: AnyClass { CAMetalLayer.self }
 
@@ -45,7 +45,7 @@ public final class VAPMetalView: UIView {
         }
     }
 
-    // MARK: - Private
+    // MARK: - 私有方法
 
     private func setup() {
         backgroundColor = .clear
@@ -55,7 +55,7 @@ public final class VAPMetalView: UIView {
         metalLayer.device = MTLCreateSystemDefaultDevice()
     }
 
-    /// Returns normalized vertex rect for the given content mode and video size.
+    /// 根据内容模式和视频尺寸返回归一化顶点矩形。
     func vertexRect(videoSize: CGSize) -> CGRect {
         let viewSize = bounds.size
         guard viewSize.width > 0, viewSize.height > 0,

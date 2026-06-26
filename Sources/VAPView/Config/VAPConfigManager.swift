@@ -2,7 +2,7 @@
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License: http://opensource.org/licenses/MIT
 //
-// Parses vapc JSON and loads attachment textures.
+// 解析 vapc JSON 并加载挂件纹理。
 
 import Foundation
 import Metal
@@ -10,9 +10,9 @@ import UIKit
 
 struct VAPAttachmentResources: @unchecked Sendable {
     let config: VAPConfig
-    /// srcId -> MTLTexture for image/text attachments
+    /// 图片/文本挂件的 srcId -> MTLTexture 映射。
     let textures: [String: MTLTexture]
-    /// The mask texture derived from the video's alpha region (nil for HWD-only playback)
+    /// 从视频 Alpha 区域生成的蒙版纹理（仅 HWD 播放时为 nil）。
     let maskTexture: MTLTexture?
 }
 
@@ -26,7 +26,7 @@ final class VAPConfigManager {
         self.imageLoader = imageLoader
     }
 
-    // MARK: - Load
+    // MARK: - 加载
 
     func load(vapcJSON: Data,
               sources: [String: VAPAttachmentSource]) async throws -> VAPAttachmentResources {
@@ -88,7 +88,7 @@ final class VAPConfigManager {
         return VAPAttachmentResources(config: config, textures: textures, maskTexture: nil)
     }
 
-    // MARK: - Texture from UIImage
+    // MARK: - 从 UIImage 创建纹理
 
     private func makeTexture(from image: UIImage) -> MTLTexture? {
         guard let cgImage = image.cgImage else { return nil }
@@ -114,7 +114,7 @@ final class VAPConfigManager {
         return texture
     }
 
-    // MARK: - Text rendering
+    // MARK: - 文本渲染
 
     @MainActor
     private static func renderTextImage(text: String, size: CGSize,
@@ -133,7 +133,7 @@ final class VAPConfigManager {
         }
     }
 
-    // MARK: - Hex color
+    // MARK: - 十六进制颜色
 
     private func parseHexColor(_ hex: String?) -> UIColor? {
         guard var hex = hex else { return nil }
