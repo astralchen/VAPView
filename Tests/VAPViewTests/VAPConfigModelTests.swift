@@ -48,12 +48,14 @@ struct VAPConfigModelTests {
         #expect(avatar?.srcId == "avatar")
         #expect(avatar?.attachmentSourceType == .image)
         #expect(avatar?.attachmentLoadType == .network)
+        #expect(avatar?.attachmentLoadType?.publicLocation == .remote)
         #expect(avatar?.attachmentFitType == .centerFull)
+        #expect(avatar?.attachmentFitType.publicContentMode == .centerFill)
         #expect(avatar?.w == 80)
 
         let name = config.src?[1]
         #expect(name?.srcId == "name")
-        #expect(name?.attachmentSourceType == .textStr)
+        #expect(name?.attachmentSourceType == .textString)
         #expect(name?.txtColor == "#FFFFFF")
         #expect(name?.txtFontSize == 14)
     }

@@ -9,14 +9,15 @@ import CoreVideo
 
 // MARK: - RGB display size
 
-/// Computes the visible RGB content size based on blend mode.
+/// Computes the visible RGB content size based on alpha placement.
 /// For left/right split the width is halved; for top/bottom the height is halved.
-func vapRGBSize(blendMode: VAPTextureBlendMode,
-                videoWidth: Int, videoHeight: Int) -> CGSize {
-    switch blendMode {
-    case .alphaLeft, .alphaRight:
+func rgbContentSize(alphaPlacement: VAPAlphaPlacement,
+                    videoWidth: Int,
+                    videoHeight: Int) -> CGSize {
+    switch alphaPlacement {
+    case .left, .right:
         return CGSize(width: videoWidth / 2, height: videoHeight)
-    case .alphaTop, .alphaBottom:
+    case .top, .bottom:
         return CGSize(width: videoWidth, height: videoHeight / 2)
     }
 }

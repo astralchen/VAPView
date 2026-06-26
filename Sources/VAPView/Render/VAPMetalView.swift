@@ -13,7 +13,7 @@ public final class VAPMetalView: UIView {
 
     // MARK: - Public
 
-    public var vapContentMode: VAPContentMode = .scaleToFill
+    public var renderContentMode: VAPContentMode = .scaleToFill
 
     /// The underlying CAMetalLayer.
     public var metalLayer: CAMetalLayer { layer as! CAMetalLayer }
@@ -62,7 +62,7 @@ public final class VAPMetalView: UIView {
               videoSize.width > 0, videoSize.height > 0 else {
             return CGRect(x: -1, y: -1, width: 2, height: 2)
         }
-        switch vapContentMode {
+        switch renderContentMode {
         case .scaleToFill:
             return CGRect(x: -1, y: -1, width: 2, height: 2)
         case .aspectFit:

@@ -96,14 +96,14 @@ final class VAPDelayedURLProtocol: URLProtocol, @unchecked Sendable {
             url: request.url!,
             statusCode: 200,
             httpVersion: nil,
-            headerFields: ["Content-Length": "4"]
+            headerFields: ["Content-Length": "4096"]
         )!
         client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
-        client?.urlProtocol(self, didLoad: Data("ab".utf8))
+        client?.urlProtocol(self, didLoad: Data(repeating: 0xAB, count: 2048))
 
         delayedState.waitUntilReleased()
 
-        client?.urlProtocol(self, didLoad: Data("cd".utf8))
+        client?.urlProtocol(self, didLoad: Data(repeating: 0xCD, count: 2048))
         client?.urlProtocolDidFinishLoading(self)
     }
 
@@ -131,6 +131,17 @@ private func tmpCacheDir() -> URL {
     return dir
 }
 
+@MainActor
+private func waitUntil(
+    _ condition: @MainActor () -> Bool,
+    timeoutNanoseconds: UInt64 = 1_000_000_000
+) async {
+    for _ in 0..<50 {
+        if condition() { return }
+        try? await Task.sleep(nanoseconds: timeoutNanoseconds / 50)
+    }
+}
+
 // MARK: - VAPDiskCacheTests
 
 // MARK: - Real network integration test
@@ -144,7 +155,7 @@ struct VAPDiskCacheNetworkTests {
         let dir = tmpCacheDir()
         let cache = VAPDiskCache(configuration: .default, cacheDirectory: dir)
         var progressValues: [Double] = []
-        let localPath = try await cache.localPath(for: Self.realURL) { p in
+        let localPath = try await cache.resolveLocalPath(for: Self.realURL) { p in
             progressValues.append(p)
         }
         #expect(FileManager.default.fileExists(atPath: localPath))
@@ -157,9 +168,9 @@ struct VAPDiskCacheNetworkTests {
     @Test func realCacheHitSkipsDownload() async throws {
         let dir = tmpCacheDir()
         let cache = VAPDiskCache(configuration: .default, cacheDirectory: dir)
-        let first = try await cache.localPath(for: Self.realURL, onProgress: { _ in })
+        let first = try await cache.resolveLocalPath(for: Self.realURL, progressHandler: { _ in })
         // Second call — file already on disk, no network request needed
-        let second = try await cache.localPath(for: Self.realURL, onProgress: { _ in })
+        let second = try await cache.resolveLocalPath(for: Self.realURL, progressHandler: { _ in })
         #expect(first == second)
     }
 }
@@ -169,11 +180,11 @@ struct VAPDiskCacheTests {
 
     // MARK: Local path passthrough
 
-    @Test func localPathReturnedUnchanged() async throws {
+    @Test func localSourceReturnedUnchanged() async throws {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
         let path = "/local/some/animation.mp4"
-        let result = try await cache.localPath(for: path, onProgress: { _ in })
+        let result = try await cache.resolveLocalPath(for: path, progressHandler: { _ in })
         #expect(result == path)
     }
 
@@ -185,7 +196,7 @@ struct VAPDiskCacheTests {
         // String that starts with http:// but is not a valid URL
         let bad = "http://[invalid url]"
         await #expect(throws: VAPError.self) {
-            _ = try await cache.localPath(for: bad, onProgress: { _ in })
+            _ = try await cache.resolveLocalPath(for: bad, progressHandler: { _ in })
         }
     }
 
@@ -197,7 +208,7 @@ struct VAPDiskCacheTests {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
         let url = "https://example.com/test.mp4"
-        let localPath = try await cache.localPath(for: url, onProgress: { _ in })
+        let localPath = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
         #expect(FileManager.default.fileExists(atPath: localPath))
         #expect(localPath.hasSuffix(".mp4"))
     }
@@ -210,10 +221,10 @@ struct VAPDiskCacheTests {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
         let url = "https://example.com/cached.mp4"
-        let first  = try await cache.localPath(for: url, onProgress: { _ in })
+        let first  = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
         // Replace mock data — second call must NOT download again
         mockResponseData = Data("new data".utf8)
-        let second = try await cache.localPath(for: url, onProgress: { _ in })
+        let second = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
         #expect(first == second)
         let content = try Data(contentsOf: URL(fileURLWithPath: first))
         #expect(content == Data("cached content".utf8))
@@ -228,25 +239,28 @@ struct VAPDiskCacheTests {
         var secondProgress: [Double] = []
 
         let first = Task {
-            try await cache.localPath(for: url) { progress in
+            try await cache.resolveLocalPath(for: url) { progress in
                 firstProgress.append(progress)
             }
         }
 
         await delayedState.waitUntilStarted()
+        await waitUntil { firstProgress == [0.5] }
+        #expect(firstProgress == [0.5])
 
         let second = Task {
-            try await cache.localPath(for: url) { progress in
+            try await cache.resolveLocalPath(for: url) { progress in
                 secondProgress.append(progress)
             }
         }
 
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await waitUntil { secondProgress == [0.5] }
+        #expect(secondProgress == [0.5])
         delayedState.releaseResponse()
 
         let firstPath = try await first.value
         let secondPath = try await second.value
-        try await Task.sleep(nanoseconds: 100_000_000)
+        await waitUntil { firstProgress.last == 1.0 && secondProgress.last == 1.0 }
 
         #expect(firstPath == secondPath)
         #expect(delayedState.requestCount == 1)
@@ -254,7 +268,7 @@ struct VAPDiskCacheTests {
         #expect(secondProgress.last == 1.0)
     }
 
-    // MARK: Progress callback
+    // MARK: Progress handler
 
     @Test @MainActor func progressCallbackFired() async throws {
         mockShouldFail = false
@@ -262,7 +276,7 @@ struct VAPDiskCacheTests {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
         var lastProgress: Double = -1
-        _ = try await cache.localPath(for: "https://example.com/progress.mp4") { p in
+        _ = try await cache.resolveLocalPath(for: "https://example.com/progress.mp4") { p in
             lastProgress = p
         }
         // Final progress must be 1.0 (set by didFinishDownloadingTo)
@@ -277,24 +291,24 @@ struct VAPDiskCacheTests {
         let cache = makeMockCache(tmpDir: dir)
         var threw = false
         do {
-            _ = try await cache.localPath(for: "https://example.com/fail.mp4", onProgress: { _ in })
+            _ = try await cache.resolveLocalPath(for: "https://example.com/fail.mp4", progressHandler: { _ in })
         } catch {
             threw = true
         }
         #expect(threw)
     }
 
-    // MARK: clearCache
+    // MARK: removeAllCachedResources
 
-    @Test func clearCacheRemovesFiles() async throws {
+    @Test func removeAllCachedResourcesRemovesFiles() async throws {
         mockShouldFail = false
         mockResponseData = Data("data".utf8)
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
-        _ = try await cache.localPath(for: "https://example.com/a.mp4", onProgress: { _ in })
+        _ = try await cache.resolveLocalPath(for: "https://example.com/a.mp4", progressHandler: { _ in })
         let beforeClear = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         #expect(!beforeClear.isEmpty)
-        try cache.clearCache()
+        try cache.removeAllCachedResources()
         let afterClear = try FileManager.default.contentsOfDirectory(atPath: dir.path)
         #expect(afterClear.isEmpty)
     }

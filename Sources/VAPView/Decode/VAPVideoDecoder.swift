@@ -20,7 +20,7 @@ actor VAPVideoDecoder {
     init(info: VAPMP4Info, bufferCapacity: Int) {
         self.info  = info
         self.buffer = VAPFrameBufferActor(capacity: bufferCapacity)
-        self.fileHandle = FileHandle(forReadingAtPath: info.filePath)
+        self.fileHandle = FileHandle(forReadingAtPath: info.localFilePath)
     }
 
     /// Must be called immediately after init before any decode calls.
@@ -37,19 +37,19 @@ actor VAPVideoDecoder {
             guard let avcC = info.avcC,
                   let sps = avcC.sps.first,
                   let pps = avcC.pps.first else {
-                throw VAPError.failedToCreateVTBDesc
+                throw VAPError.videoToolboxDescriptionCreationFailed
             }
             formatDesc = try makeH264FormatDesc(sps: sps, pps: pps)
         case .h265:
             guard let hvcC = info.hvcC else {
-                throw VAPError.failedToCreateVTBDesc
+                throw VAPError.videoToolboxDescriptionCreationFailed
             }
             formatDesc = try makeH265FormatDesc(hvcC: hvcC)
         }
     }
 
     private func setupDecompressionSession() throws {
-        guard let formatDesc else { throw VAPError.failedToCreateVTBSession }
+        guard let formatDesc else { throw VAPError.videoToolboxSessionCreationFailed }
         var decoderSpec: [CFString: Any] = [:]
         if #available(iOS 17.0, *) {
             decoderSpec[kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder] = true
@@ -68,7 +68,7 @@ actor VAPVideoDecoder {
             decompressionSessionOut: &session
         )
         guard status == noErr, let session else {
-            throw VAPError.failedToCreateVTBSession
+            throw VAPError.videoToolboxSessionCreationFailed
         }
         self.session = session
     }
@@ -84,7 +84,7 @@ actor VAPVideoDecoder {
             throw VAPError.decodeFailed(NSError(domain: "VAPDecoder", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "readSampleData returned nil for index=\(index) offset=\(sample.offset) size=\(sample.size)"]))
         }
-        guard let formatDesc, let session else { throw VAPError.failedToCreateVTBSession }
+        guard let formatDesc, let session else { throw VAPError.videoToolboxSessionCreationFailed }
 
         let isKey = sample.isKeySample
         var timingInfo = CMSampleTimingInfo(
@@ -121,9 +121,9 @@ actor VAPVideoDecoder {
         // we wrap it in a Sendable box to satisfy Swift 6.
         var flags = VTDecodeInfoFlags()
         let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
-        let pixelBuffer: CVPixelBuffer = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CVPixelBuffer, any Error>) in
-            let callbackData = DecodeCallbackData(continuation: cont)
-            let unmanagedRef = Unmanaged.passRetained(callbackData)
+        let pixelBuffer: CVPixelBuffer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CVPixelBuffer, any Error>) in
+            let continuationBox = DecodeContinuationBox(continuation: continuation)
+            let unmanagedRef = Unmanaged.passRetained(continuationBox)
             let decStatus = VTDecompressionSessionDecodeFrame(
                 session,
                 sampleBuffer: sampleBuffer,
@@ -132,13 +132,13 @@ actor VAPVideoDecoder {
                 outputHandler: { status, _, pixBuf, _, _ in
                     let ref = unmanagedRef
                     defer { ref.release() }
-                    let cb = ref.takeUnretainedValue()
+                    let continuationBox = ref.takeUnretainedValue()
                     if status == noErr, let pixBuf {
                         decoderLog.debug("VT outputHandler: got pixBuf index=\(index)")
-                        cb.continuation.resume(returning: SendableCVPixelBuffer(pixBuf).value)
+                        continuationBox.continuation.resume(returning: SendableCVPixelBuffer(pixBuf).value)
                     } else {
                         decoderLog.error("VT outputHandler: failed index=\(index) status=\(status) pixBuf=\(pixBuf == nil ? "nil" : "ok")")
-                        cb.continuation.resume(
+                        continuationBox.continuation.resume(
                             throwing: VAPError.decodeFailed(
                                 NSError(domain: "VAPDecoder", code: Int(status))
                             )
@@ -148,7 +148,7 @@ actor VAPVideoDecoder {
             )
             if decStatus != noErr {
                 unmanagedRef.release()
-                cont.resume(throwing: VAPError.decodeFailed(
+                continuation.resume(throwing: VAPError.decodeFailed(
                     NSError(domain: "VAPDecoder", code: Int(decStatus))))
             }
         }
@@ -159,7 +159,7 @@ actor VAPVideoDecoder {
         await buffer.push(frame)
         if index < 3 {
             let count = await buffer.count
-            decoderLog.debug("decoded+pushed sample \(index) presentation=\(sample.presentationIndex) bufCount=\(count)")
+            decoderLog.debug("decoded+pushed sample \(index) presentation=\(sample.presentationIndex) bufferedFrameCount=\(count)")
         }
     }
 
@@ -175,7 +175,7 @@ actor VAPVideoDecoder {
         await buffer.popFrame(at: targetIndex)
     }
 
-    func bufferCount() async -> Int {
+    func bufferedFrameCount() async -> Int {
         await buffer.count
     }
 
@@ -284,13 +284,13 @@ actor VAPVideoDecoder {
                 )
             }
         }
-        guard status == noErr, let desc else { throw VAPError.failedToCreateVTBDesc }
+        guard status == noErr, let desc else { throw VAPError.videoToolboxDescriptionCreationFailed }
         return desc
     }
 
     private func makeH265FormatDesc(hvcC: VAPHvcCData) throws -> CMVideoFormatDescription {
         guard let vps = hvcC.vps, let sps = hvcC.sps, let pps = hvcC.pps else {
-            throw VAPError.failedToCreateVTBDesc
+            throw VAPError.videoToolboxDescriptionCreationFailed
         }
         var desc: CMVideoFormatDescription?
         let status: OSStatus = vps.withUnsafeBytes { vpsPtr in
@@ -318,7 +318,7 @@ actor VAPVideoDecoder {
                 }
             }
         }
-        guard status == noErr, let desc else { throw VAPError.failedToCreateVTBDesc }
+        guard status == noErr, let desc else { throw VAPError.videoToolboxDescriptionCreationFailed }
         return desc
     }
 }
@@ -332,9 +332,9 @@ private struct SendableCVPixelBuffer: @unchecked Sendable {
     init(_ pb: CVPixelBuffer) { self.value = pb }
 }
 
-// MARK: - Callback helper (reference type for Unmanaged)
+// MARK: - Continuation helper (reference type for Unmanaged)
 
-private final class DecodeCallbackData: @unchecked Sendable {
+private final class DecodeContinuationBox: @unchecked Sendable {
     let continuation: CheckedContinuation<CVPixelBuffer, any Error>
     init(continuation: CheckedContinuation<CVPixelBuffer, any Error>) {
         self.continuation = continuation

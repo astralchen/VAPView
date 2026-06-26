@@ -5,6 +5,51 @@
 import Foundation
 import CoreGraphics
 
+enum VAPConfigOrientation: Int, Sendable {
+    case none = 0
+    case portrait = 1
+    case landscape = 2
+}
+
+enum VAPConfigAttachmentSourceType: String, Sendable {
+    case text = "txt"
+    case textString = "txtStr"
+    case image = "img"
+    case imageURL = "imgUrl"
+}
+
+enum VAPConfigAttachmentLoadType: String, Sendable {
+    case local = "local"
+    case network = "net"
+}
+
+enum VAPConfigAttachmentFitType: String, Sendable {
+    case fitXY = "fitXY"
+    case centerFull = "centerFull"
+}
+
+extension VAPConfigAttachmentLoadType {
+    var publicLocation: VAPAttachmentLoadLocation {
+        switch self {
+        case .local:
+            return .local
+        case .network:
+            return .remote
+        }
+    }
+}
+
+extension VAPConfigAttachmentFitType {
+    var publicContentMode: VAPAttachmentImageContentMode {
+        switch self {
+        case .fitXY:
+            return .scaleToFill
+        case .centerFull:
+            return .centerFill
+        }
+    }
+}
+
 // MARK: - Top-level VAP config (decoded from vapc JSON)
 
 public struct VAPConfig: Decodable, Sendable {
@@ -27,7 +72,7 @@ public struct VAPCommonInfo: Decodable, Sendable {
     /// May be half-resolution compared to rgbFrame (space optimization).
     public let aFrame: [CGFloat]?
 
-    var orientation: VAPOrientation { VAPOrientation(rawValue: orien) ?? .none }
+    var orientation: VAPConfigOrientation { VAPConfigOrientation(rawValue: orien) ?? .none }
     var version: Int { v ?? 0 }
 
     /// Returns the RGB rect within the video, or nil if rgbFrame is absent/invalid.
@@ -56,14 +101,14 @@ public struct VAPSourceInfo: Decodable, Sendable {
     public let txtColor: String?
     public let txtFontSize: CGFloat?
 
-    var attachmentSourceType: VAPAttachmentSourceType? {
-        srcType.flatMap(VAPAttachmentSourceType.init(rawValue:))
+    var attachmentSourceType: VAPConfigAttachmentSourceType? {
+        srcType.flatMap(VAPConfigAttachmentSourceType.init(rawValue:))
     }
-    var attachmentLoadType: VAPAttachmentLoadType? {
-        loadType.flatMap(VAPAttachmentLoadType.init(rawValue:))
+    var attachmentLoadType: VAPConfigAttachmentLoadType? {
+        loadType.flatMap(VAPConfigAttachmentLoadType.init(rawValue:))
     }
-    var attachmentFitType: VAPAttachmentFitType {
-        fitType.flatMap(VAPAttachmentFitType.init(rawValue:)) ?? .centerFull
+    var attachmentFitType: VAPConfigAttachmentFitType {
+        fitType.flatMap(VAPConfigAttachmentFitType.init(rawValue:)) ?? .centerFull
     }
 }
 

@@ -8,31 +8,31 @@ import AVFoundation
 
 // MARK: - Configuration
 
-public struct VAPPlayConfig: Sendable {
+public struct VAPPlaybackConfiguration: Sendable {
     /// Source file path or URL string
-    public var filePath: String
+    public var source: String
     /// Alpha channel position in the video frame.
     ///
     /// Only takes effect when the MP4 does **not** contain a `vapc` box with
     /// `rgbFrame`/`aFrame` fields. When those fields are present, the renderer
     /// reads the exact RGB and alpha regions from the config and this value is ignored.
-    public var blendMode: VAPTextureBlendMode
+    public var alphaPlacement: VAPAlphaPlacement
     /// Background lifecycle behaviour
-    public var backgroundPolicy: VAPBackgroundPolicy
+    public var backgroundPolicy: VAPBackgroundPlaybackPolicy
     /// Content scale mode
     public var contentMode: VAPContentMode
     /// Attachment sources: srcId -> typed value (image, URL string, or text)
     public var attachmentSources: [String: VAPAttachmentSource]
     /// Optional image loader for network/local URL attachments
-    public var imageLoader: VAPImageLoader?
+    public var imageLoader: VAPAttachmentImageLoader?
     /// Decode buffer depth (default 3)
-    public var bufferCount: Int
+    public var frameBufferCapacity: Int
     /// Override FPS (0 = use MP4 header value)
-    public var fps: Int
+    public var preferredFramesPerSecond: Int
     /// Whether to play audio track if present
-    public var playAudio: Bool
+    public var playsAudio: Bool
     /// Optional external mask applied over every frame (VAP renderer path only)
-    public var maskInfo: VAPMaskInfo?
+    public var mask: VAPMaskConfiguration?
     /// Number of times to play. 1 = once (default), 0 = infinite, N = N times.
     /// Loop is handled inside the player — no Metal/texture teardown between cycles.
     ///
@@ -42,28 +42,28 @@ public struct VAPPlayConfig: Sendable {
     ///   decoder, audio player) until the `VAPPlayer` is deallocated.
     public var loopCount: Int
 
-    public init(filePath: String,
-                blendMode: VAPTextureBlendMode = .alphaRight,
-                backgroundPolicy: VAPBackgroundPolicy = .stop,
+    public init(source: String,
+                alphaPlacement: VAPAlphaPlacement = .right,
+                backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
                 contentMode: VAPContentMode = .scaleToFill,
                 attachmentSources: [String: VAPAttachmentSource] = [:],
-                imageLoader: VAPImageLoader? = nil,
-                bufferCount: Int = 3,
-                fps: Int = 0,
-                playAudio: Bool = true,
-                maskInfo: VAPMaskInfo? = nil,
+                imageLoader: VAPAttachmentImageLoader? = nil,
+                frameBufferCapacity: Int = 3,
+                preferredFramesPerSecond: Int = 0,
+                playsAudio: Bool = true,
+                mask: VAPMaskConfiguration? = nil,
                 loopCount: Int = 1) {
-        self.filePath          = filePath
-        self.blendMode         = blendMode
-        self.backgroundPolicy  = backgroundPolicy
-        self.contentMode       = contentMode
-        self.attachmentSources = attachmentSources
-        self.imageLoader       = imageLoader
-        self.bufferCount       = bufferCount
-        self.fps               = fps
-        self.playAudio         = playAudio
-        self.maskInfo          = maskInfo
-        self.loopCount         = loopCount
+        self.source                   = source
+        self.alphaPlacement           = alphaPlacement
+        self.backgroundPolicy         = backgroundPolicy
+        self.contentMode              = contentMode
+        self.attachmentSources        = attachmentSources
+        self.imageLoader              = imageLoader
+        self.frameBufferCapacity      = frameBufferCapacity
+        self.preferredFramesPerSecond = preferredFramesPerSecond
+        self.playsAudio               = playsAudio
+        self.mask                     = mask
+        self.loopCount                = loopCount
     }
 }
 
@@ -92,17 +92,17 @@ public final class VAPPlayer {
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
 
-    private var currentConfig: VAPPlayConfig?
+    private var currentConfiguration: VAPPlaybackConfiguration?
     private var currentFrameIndex: Int = 0
-    private let mtlDevice: MTLDevice?
-    private var onEventCallback: ((VAPEvent) -> Void)?
-    private var epoch: Int = 0
+    private let metalDevice: MTLDevice?
+    private var eventHandler: ((VAPEvent) -> Void)?
+    private var playbackGeneration: Int = 0
 
     // MARK: - Init
 
     public init(frame: CGRect = .zero) {
         self.metalView = VAPMetalView(frame: frame)
-        self.mtlDevice = MTLCreateSystemDefaultDevice()
+        self.metalDevice = MTLCreateSystemDefaultDevice()
         var cont: AsyncStream<VAPEvent>.Continuation!
         self._eventStream = AsyncStream { cont = $0 }
         self._eventContinuation = cont
@@ -114,34 +114,74 @@ public final class VAPPlayer {
 
     // MARK: - Public API
 
-    public func play(config: VAPPlayConfig, onEvent: ((VAPEvent) -> Void)? = nil) {
-        stop()
-        epoch &+= 1
-        currentConfig = config
+    public func play(_ configuration: VAPPlaybackConfiguration, eventHandler: ((VAPEvent) -> Void)? = nil) {
+        stop(emitEvent: false)
+        playbackGeneration &+= 1
+        currentConfiguration = configuration
         currentFrameIndex = 0
-        onEventCallback = onEvent
-        metalView.vapContentMode = config.contentMode
-        setupBackgroundObservers(policy: config.backgroundPolicy)
-        let myEpoch = epoch
+        self.eventHandler = eventHandler
+        metalView.renderContentMode = configuration.contentMode
+        installBackgroundObservers(for: configuration.backgroundPolicy)
+        let generation = playbackGeneration
         playbackTask = Task { [weak self] in
-            await self?.runPlayback(config: config, startFrame: 0, epoch: myEpoch)
+            await self?.runPlayback(configuration: configuration, startFrame: 0, generation: generation)
         }
     }
 
     public func stop() {
-        playbackTask?.cancel()
-        playbackTask = nil
-        currentFrameIndex = 0
-        onEventCallback = nil
-        stopAudio()
-        removeBackgroundObservers()
-        currentConfig = nil
+        stop(emitEvent: true)
     }
 
-    private func emitEvent(_ event: VAPEvent, epoch: Int) {
-        guard epoch == self.epoch else { return }
+    func stopForReplacement() {
+        stop(emitEvent: false)
+    }
+
+    private func stop(emitEvent shouldEmitStop: Bool) {
+        let lastFrame = currentFrameIndex
+        let hasActivePlayback = playbackTask != nil || currentConfiguration != nil
+        let handler = eventHandler
+
+        playbackGeneration &+= 1
+        playbackTask?.cancel()
+        playbackTask = nil
+        stopAudio()
+        removeLifecycleObservers()
+        currentConfiguration = nil
+        currentFrameIndex = 0
+        eventHandler = nil
+
+        if shouldEmitStop && hasActivePlayback {
+            deliverEvent(.didStop(lastFrame: lastFrame), to: handler)
+        }
+    }
+
+    private func deliverEvent(_ event: VAPEvent) {
         _eventContinuation.yield(event)
-        onEventCallback?(event)
+        eventHandler?(event)
+    }
+
+    private func deliverEvent(_ event: VAPEvent, to handler: ((VAPEvent) -> Void)?) {
+        _eventContinuation.yield(event)
+        handler?(event)
+    }
+
+    private func emitEvent(_ event: VAPEvent, generation: Int) {
+        guard generation == self.playbackGeneration else { return }
+        deliverEvent(event)
+    }
+
+    private func completePlayback(with event: VAPEvent, generation: Int) {
+        guard generation == playbackGeneration else { return }
+        let handler = eventHandler
+
+        playbackTask = nil
+        stopAudio()
+        removeLifecycleObservers()
+        currentConfiguration = nil
+        currentFrameIndex = 0
+        eventHandler = nil
+
+        deliverEvent(event, to: handler)
     }
 
     public func pause() {
@@ -151,91 +191,97 @@ public final class VAPPlayer {
     }
 
     public func resume() {
-        guard let config = currentConfig else { return }
+        guard let configuration = currentConfiguration else { return }
         audioPlayer?.play()
         let startFrame = currentFrameIndex
-        let myEpoch = epoch
+        let generation = playbackGeneration
         playbackTask = Task { [weak self] in
-            await self?.runPlayback(config: config, startFrame: startFrame, epoch: myEpoch)
+            await self?.runPlayback(configuration: configuration, startFrame: startFrame, generation: generation)
         }
     }
 
-    public func setMute(_ mute: Bool) {
-        audioPlayer?.volume = mute ? 0 : 1
+    public func setMuted(_ isMuted: Bool) {
+        audioPlayer?.volume = isMuted ? 0 : 1
     }
 
     // MARK: - Playback loop
 
-    private func runPlayback(config: VAPPlayConfig, startFrame: Int = 0, epoch: Int) async {
+    private func runPlayback(configuration: VAPPlaybackConfiguration, startFrame: Int = 0, generation: Int) async {
         do {
-            playerLog.debug("runPlayback start source=\(Self.logSourceDescription(config.filePath))")
+            playerLog.debug("runPlayback start source=\(Self.logSourceDescription(configuration.source))")
             // 1. Parse MP4 on background thread
             let info: VAPMP4Info = try await Task.detached(priority: .userInitiated) {
-                try VAPMP4Parser.parse(filePath: config.filePath)
+                try VAPMP4Parser.parse(localFilePath: configuration.source)
             }.value
             playerLog.debug("parsed: frames=\(info.frameCount) fps=\(info.fps) size=\(info.width)x\(info.height) hasAudio=\(info.hasAudioTrack) vapc=\(info.vapcJSON != nil)")
-            playerLog.debug("config: blendMode=\(config.blendMode.rawValue) contentMode=\(config.contentMode) loopCount=\(config.loopCount)")
+            playerLog.debug("configuration: alphaPlacement=\(configuration.alphaPlacement.rawValue) contentMode=\(configuration.contentMode) loopCount=\(configuration.loopCount)")
 
             // 2. Validate VAP version
             if let jsonData = info.vapcJSON {
                 let cfg = try? JSONDecoder().decode(VAPConfig.self, from: jsonData)
-                if let v = cfg?.info.version, v > kVAPMaxCompatibleVersion {
+                if let v = cfg?.info.version, v > VAPPlaybackDefaults.maximumCompatibleConfigVersion {
                     throw VAPError.incompatibleVersion(v)
                 }
             }
 
             // 3. Metal device (cached at init) + renderer (reused across all loop cycles)
-            guard let device = mtlDevice else {
+            guard let device = metalDevice else {
                 playerLog.error("Metal device unavailable")
                 throw VAPError.metalUnavailable
             }
             playerLog.debug("Metal device: \(device.name)")
 
-            let useVAPPath = info.vapcJSON != nil
-            let hwdRenderer  = useVAPPath ? nil       : try VAPHWDRenderer(device: device)
-            let vapRenderer  = useVAPPath ? try VAPRenderer(device: device) : nil
-            playerLog.debug("useVAPPath=\(useVAPPath) hwdRenderer=\(hwdRenderer != nil) vapRenderer=\(vapRenderer != nil)")
+            let usesAttachmentRenderer = info.vapcJSON != nil
+            let splitAlphaRenderer = usesAttachmentRenderer ? nil : try VAPHWDRenderer(device: device)
+            let attachmentRenderer = usesAttachmentRenderer ? try VAPRenderer(device: device) : nil
+            playerLog.debug("usesAttachmentRenderer=\(usesAttachmentRenderer) splitAlphaRenderer=\(splitAlphaRenderer != nil) attachmentRenderer=\(attachmentRenderer != nil)")
 
             // 4. Load attachment config (VAP path, reused across all loop cycles)
-            var attachResources: VAPAttachmentResources?
-            if useVAPPath, let jsonData = info.vapcJSON {
-                let _device = device
-                let _loader = config.imageLoader
-                let _sources = config.attachmentSources
-                attachResources = try await Task.detached(priority: .userInitiated) {
-                    let mgr = VAPConfigManager(device: _device, imageLoader: _loader)
-                    return try await mgr.load(vapcJSON: jsonData, sources: _sources)
+            var attachmentResources: VAPAttachmentResources?
+            if usesAttachmentRenderer, let jsonData = info.vapcJSON {
+                let attachmentDevice = device
+                let attachmentImageLoader = configuration.imageLoader
+                let attachmentSources = configuration.attachmentSources
+                attachmentResources = try await Task.detached(priority: .userInitiated) {
+                    let configManager = VAPConfigManager(device: attachmentDevice, imageLoader: attachmentImageLoader)
+                    return try await configManager.load(vapcJSON: jsonData, sources: attachmentSources)
                 }.value
-                playerLog.debug("attachResources loaded")
+                playerLog.debug("attachmentResources loaded")
             }
 
-            // 4b. External mask override (VAPMaskInfo → MTLTexture, reused across all loop cycles)
-            let externalMaskTexture: MTLTexture? = config.maskInfo.flatMap {
+            // 4b. External mask override (VAPMaskConfiguration -> MTLTexture, reused across all loop cycles)
+            let externalMaskTexture: MTLTexture? = configuration.mask.flatMap {
                 Self.makeTexture(from: $0, device: device)
             }
 
             // Loop state
-            let loopCount = config.loopCount  // 0 = infinite
+            let loopCount = configuration.loopCount  // 0 = infinite
             var loopIndex = 0
 
             // 5. Create decoder (reset between cycles, not recreated)
             let reorderBufferDepth = Self.requiredBufferDepth(for: info.videoSamples)
-            let bufCount    = max(max(1, config.bufferCount), reorderBufferDepth)
-            let decoder     = VAPVideoDecoder(info: info, bufferCapacity: bufCount)
+            let frameBufferCapacity = max(max(1, configuration.frameBufferCapacity), reorderBufferDepth)
+            let decoder     = VAPVideoDecoder(info: info, bufferCapacity: frameBufferCapacity)
             try await decoder.prepare()
-            playerLog.debug("decoder prepared bufCount=\(bufCount) totalFrames=\(info.frameCount)")
+            playerLog.debug("decoder prepared frameBufferCapacity=\(frameBufferCapacity) totalFrames=\(info.frameCount)")
 
-            let fps           = config.fps > 0 ? config.fps : max(kVAPMinFPS, min(info.fps, kVAPMaxFPS))
+            let fps = configuration.preferredFramesPerSecond > 0
+                ? configuration.preferredFramesPerSecond
+                : max(
+                    VAPPlaybackDefaults.minimumFramesPerSecond,
+                    min(info.fps, VAPPlaybackDefaults.maximumFramesPerSecond)
+                )
             let frameDuration = 1.0 / Double(fps)
             let totalFrames   = info.frameCount
             playerLog.debug("fps=\(fps) frameDuration=\(frameDuration)")
 
             // Audio — create once, reused across all loop cycles
-            if config.playAudio && info.hasAudioTrack {
-                setupAudio(filePath: config.filePath)
+            if configuration.playsAudio && info.hasAudioTrack {
+                setupAudio(localFilePath: configuration.source)
             }
 
             // 6. Outer loop — Metal/texture/audio objects are reused across all cycles
+            var didFinishPlayback = false
             repeat {
                 // Reset decoder for cycles after the first
                 if loopIndex > 0 {
@@ -244,84 +290,91 @@ public final class VAPPlayer {
                     audioPlayer?.currentTime = 0
                 }
 
-                let cycleStart = loopIndex == 0 ? startFrame : 0
-                let initialDecodeEnd = min(cycleStart + bufCount, totalFrames)
-                for i in cycleStart..<initialDecodeEnd {
+                let cycleStartFrame = loopIndex == 0 ? startFrame : 0
+                let initialDecodeEndFrame = min(cycleStartFrame + frameBufferCapacity, totalFrames)
+                for i in cycleStartFrame..<initialDecodeEndFrame {
                     guard !Task.isCancelled else {
                         await decoder.invalidate()
                         return
                     }
                     try await decoder.decodeFrame(at: i)
                 }
-                let decodeProducer = Self.startDecodeProducer(decoder: decoder,
-                                                               startIndex: initialDecodeEnd,
-                                                               totalFrames: totalFrames)
+                let decodeProducerTask = Self.startDecodeProducer(decoder: decoder,
+                                                                  startIndex: initialDecodeEndFrame,
+                                                                  totalFrames: totalFrames)
 
-                audioPlayer?.play()
-                playerLog.debug("didStart loop=\(loopIndex)")
-                emitEvent(.didStart, epoch: epoch)
+                do {
+                    audioPlayer?.play()
+                    playerLog.debug("didStart loop=\(loopIndex)")
+                    emitEvent(.didStart, generation: generation)
 
-                var frameIndex = cycleStart
+                    var frameIndex = cycleStartFrame
 
-                // Inner render loop
-                while frameIndex < totalFrames {
-                    if Task.isCancelled {
-                        decodeProducer.cancel()
-                        stopAudio()
-                        playerLog.debug("didStop lastFrame=\(frameIndex)")
-                        emitEvent(.didStop(lastFrame: frameIndex), epoch: epoch)
-                        await decoder.invalidate()
-                        return
+                    // Inner render loop
+                    while frameIndex < totalFrames {
+                        if Task.isCancelled {
+                            decodeProducerTask.cancel()
+                            await decodeProducerTask.value
+                            stopAudio()
+                            await decoder.invalidate()
+                            return
+                        }
+
+                        let frameStart = CACurrentMediaTime()
+
+                        // Pop the exact presentation frame — wait up to one full frame duration before skipping.
+                        // Each retry sleeps 2 ms; ~(frameDuration / 0.002) retries max.
+                        var decodedFrame: VAPDecodedFrame?
+                        let maxRetries = max(10, Int(frameDuration / 0.002))
+                        for _ in 0..<maxRetries {
+                            decodedFrame = await decoder.popFrame(at: frameIndex)
+                            if decodedFrame != nil { break }
+                            try await Task.sleep(nanoseconds: 2_000_000)
+                        }
+                        guard let frame = decodedFrame else {
+                            // Decoder stalled beyond one frame budget — skip to keep timing.
+                            playerLog.debug("frame \(frameIndex) stalled; skipping")
+                            frameIndex += 1
+                            continue
+                        }
+
+                        // Render
+                        if frameIndex == 0 { playerLog.debug("rendering first frame via \(usesAttachmentRenderer ? "VAP" : "HWD") path") }
+                        if let splitAlphaRenderer {
+                            splitAlphaRenderer.render(pixelBuffer: frame.pixelBuffer,
+                                                      into: metalView,
+                                                      alphaPlacement: configuration.alphaPlacement)
+                        } else if let attachmentRenderer {
+                            attachmentRenderer.render(pixelBuffer: frame.pixelBuffer,
+                                                      into: metalView,
+                                                      alphaPlacement: configuration.alphaPlacement,
+                                                      config: attachmentResources?.config,
+                                                      attachmentTextures: attachmentResources?.textures ?? [:],
+                                                      maskTexture: externalMaskTexture ?? attachmentResources?.maskTexture,
+                                                      frameIndex: frame.frameIndex)
+                        }
+
+                        emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
+
+                        frameIndex = frame.frameIndex + 1
+                        currentFrameIndex = frameIndex
+
+                        // Frame pacing
+                        let elapsed = CACurrentMediaTime() - frameStart
+                        let remaining = frameDuration - elapsed
+                        if remaining > 0.001 {
+                            try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                        }
                     }
-
-                    let frameStart = CACurrentMediaTime()
-
-                    // Pop the exact presentation frame — wait up to one full frame duration before skipping.
-                    // Each retry sleeps 2 ms; ~(frameDuration / 0.002) retries max.
-                    var decodedFrame: VAPDecodedFrame?
-                    let maxRetries = max(10, Int(frameDuration / 0.002))
-                    for _ in 0..<maxRetries {
-                        decodedFrame = await decoder.popFrame(at: frameIndex)
-                        if decodedFrame != nil { break }
-                        try await Task.sleep(nanoseconds: 2_000_000)
-                    }
-                    guard let frame = decodedFrame else {
-                        // Decoder stalled beyond one frame budget — skip to keep timing.
-                        playerLog.debug("frame \(frameIndex) stalled; skipping")
-                        frameIndex += 1
-                        continue
-                    }
-
-                    // Render
-                    if frameIndex == 0 { playerLog.debug("rendering first frame via \(useVAPPath ? "VAP" : "HWD") path") }
-                    if let hwd = hwdRenderer {
-                        hwd.render(pixelBuffer: frame.pixelBuffer,
-                                   into: metalView,
-                                   blendMode: config.blendMode)
-                    } else if let vap = vapRenderer {
-                        vap.render(pixelBuffer: frame.pixelBuffer,
-                                   into: metalView,
-                                   blendMode: config.blendMode,
-                                   config: attachResources?.config,
-                                   attachmentTextures: attachResources?.textures ?? [:],
-                                   maskTexture: externalMaskTexture ?? attachResources?.maskTexture,
-                                   frameIndex: frame.frameIndex)
-                    }
-
-                    emitEvent(.didPlayFrame(index: frame.frameIndex), epoch: epoch)
-
-                    frameIndex = frame.frameIndex + 1
-                    currentFrameIndex = frameIndex
-
-                    // Frame pacing
-                    let elapsed = CACurrentMediaTime() - frameStart
-                    let remaining = frameDuration - elapsed
-                    if remaining > 0.001 {
-                        try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                    }
+                    decodeProducerTask.cancel()
+                    await decodeProducerTask.value
+                } catch {
+                    decodeProducerTask.cancel()
+                    await decodeProducerTask.value
+                    stopAudio()
+                    await decoder.invalidate()
+                    throw error
                 }
-                decodeProducer.cancel()
-                await decodeProducer.value
 
                 stopAudio()
 
@@ -329,29 +382,32 @@ public final class VAPPlayer {
                 let isLastCycle = loopCount != 0 && loopIndex >= loopCount
                 if isLastCycle {
                     playerLog.debug("didFinish totalFrames=\(totalFrames)")
-                    emitEvent(.didFinish(totalFrames: totalFrames), epoch: epoch)
+                    didFinishPlayback = true
                 } else {
                     playerLog.debug("didLoopFinish loop=\(loopIndex) totalFrames=\(totalFrames)")
-                    emitEvent(.didLoopFinish(loop: loopIndex, totalFrames: totalFrames), epoch: epoch)
+                    emitEvent(.didLoopFinish(loop: loopIndex, totalFrames: totalFrames), generation: generation)
                 }
 
             } while loopCount == 0 || loopIndex < loopCount
 
             await decoder.invalidate()
+            if didFinishPlayback {
+                completePlayback(with: .didFinish(totalFrames: totalFrames), generation: generation)
+            }
 
         } catch let error as VAPError {
             playerLog.error("VAPError: \(Self.logDescription(for: error))")
-            emitEvent(.didFail(error), epoch: epoch)
+            completePlayback(with: .didFail(error), generation: generation)
         } catch {
             if !Task.isCancelled {
                 playerLog.error("Unknown error: \(Self.logDescription(for: error))")
-                emitEvent(.didFail(.unknown(error.localizedDescription)), epoch: epoch)
+                completePlayback(with: .didFail(.unknown(error.localizedDescription)), generation: generation)
             }
         }
     }
 
-    private nonisolated static func logSourceDescription(_ filePath: String) -> String {
-        guard let url = URL(string: filePath), let scheme = url.scheme, !scheme.isEmpty else {
+    private nonisolated static func logSourceDescription(_ source: String) -> String {
+        guard let url = URL(string: source), let scheme = url.scheme, !scheme.isEmpty else {
             return "local-file"
         }
         switch scheme.lowercased() {
@@ -370,14 +426,14 @@ public final class VAPPlayer {
             return "unsupportedURLScheme(\(scheme))"
         case .invalidMP4File:
             return "invalidMP4File"
-        case .cannotGetStreamInfo:
-            return "cannotGetStreamInfo"
-        case .cannotGetStream:
-            return "cannotGetStream"
-        case .failedToCreateVTBDesc:
-            return "failedToCreateVTBDesc"
-        case .failedToCreateVTBSession:
-            return "failedToCreateVTBSession"
+        case .streamInfoUnavailable:
+            return "streamInfoUnavailable"
+        case .streamUnavailable:
+            return "streamUnavailable"
+        case .videoToolboxDescriptionCreationFailed:
+            return "videoToolboxDescriptionCreationFailed"
+        case .videoToolboxSessionCreationFailed:
+            return "videoToolboxSessionCreationFailed"
         case .incompatibleVersion(let version):
             return "incompatibleVersion(\(version))"
         case .missingVAPConfig:
@@ -437,10 +493,10 @@ public final class VAPPlayer {
 
     // MARK: - Audio
 
-    private func setupAudio(filePath: String) {
+    private func setupAudio(localFilePath: String) {
         // AVAudioPlayer does not support network URLs — skip for remote files.
-        guard !filePath.hasPrefix("http://"), !filePath.hasPrefix("https://") else { return }
-        let url = URL(fileURLWithPath: filePath)
+        guard !localFilePath.hasPrefix("http://"), !localFilePath.hasPrefix("https://") else { return }
+        let url = URL(fileURLWithPath: localFilePath)
         audioPlayer = try? AVAudioPlayer(contentsOf: url)
         audioPlayer?.prepareToPlay()
     }
@@ -452,8 +508,8 @@ public final class VAPPlayer {
 
     // MARK: - Background handling
 
-    private func setupBackgroundObservers(policy: VAPBackgroundPolicy) {
-        guard policy != .doNothing else { return }
+    private func installBackgroundObservers(for policy: VAPBackgroundPlaybackPolicy) {
+        guard policy != .ignore else { return }
         let nc = NotificationCenter.default
         backgroundObserver = nc.addObserver(
             forName: UIApplication.didEnterBackgroundNotification,
@@ -465,7 +521,7 @@ public final class VAPPlayer {
                     self.stop()
                 case .pauseAndResume:
                     self.pause()
-                case .doNothing:
+                case .ignore:
                     break
                 }
             }
@@ -480,7 +536,7 @@ public final class VAPPlayer {
         }
     }
 
-    private func removeBackgroundObservers() {
+    private func removeLifecycleObservers() {
         if let obs = backgroundObserver { NotificationCenter.default.removeObserver(obs) }
         if let obs = foregroundObserver  { NotificationCenter.default.removeObserver(obs) }
         backgroundObserver = nil
@@ -489,15 +545,15 @@ public final class VAPPlayer {
 
     // MARK: - Mask texture factory
 
-    private static func makeTexture(from maskInfo: VAPMaskInfo, device: MTLDevice) -> MTLTexture? {
-        let w = Int(maskInfo.dataSize.width)
-        let h = Int(maskInfo.dataSize.height)
-        guard w > 0, h > 0, maskInfo.data.count >= w * h else { return nil }
+    private static func makeTexture(from mask: VAPMaskConfiguration, device: MTLDevice) -> MTLTexture? {
+        let w = Int(mask.dataSize.width)
+        let h = Int(mask.dataSize.height)
+        guard w > 0, h > 0, mask.data.count >= w * h else { return nil }
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm, width: w, height: h, mipmapped: false)
         desc.usage = .shaderRead
         guard let texture = device.makeTexture(descriptor: desc) else { return nil }
-        maskInfo.data.withUnsafeBytes { ptr in
+        mask.data.withUnsafeBytes { ptr in
             texture.replace(
                 region: MTLRegionMake2D(0, 0, w, h),
                 mipmapLevel: 0,
