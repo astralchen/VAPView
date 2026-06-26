@@ -41,6 +41,26 @@ struct VAPPlayerEventTests {
         player.stop()
     }
 
+    @Test @MainActor func stopAfterPauseDeliversOneDidStop() async {
+        let player = VAPPlayer()
+        var receivedEvents: [VAPEvent] = []
+
+        player.play(
+            VAPPlaybackConfiguration(source: "/nonexistent/paused-stop-event.mp4", playsAudio: false)
+        ) { event in
+            receivedEvents.append(event)
+        }
+
+        player.pause()
+        player.stop()
+
+        #expect(Self.didStopFrames(in: receivedEvents) == [0])
+
+        await Task.yield()
+
+        #expect(Self.didStopFrames(in: receivedEvents) == [0])
+    }
+
     @Test @MainActor func replacingPlaybackThroughVAPViewDoesNotEmitDidStop() async {
         let view = VAPView()
         var firstPlaybackEvents: [VAPEvent] = []
@@ -59,6 +79,23 @@ struct VAPPlayerEventTests {
         #expect(Self.didStopFrames(in: secondPlaybackEvents).isEmpty)
 
         view.stop()
+    }
+
+    @Test @MainActor func stopThroughVAPViewDeliversDidStopForActivePlayback() async {
+        let view = VAPView()
+        var receivedEvents: [VAPEvent] = []
+
+        view.play(source: "/nonexistent/vapview-stop-event.mp4", playsAudio: false, eventHandler: { event in
+            receivedEvents.append(event)
+        })
+
+        view.stop()
+
+        #expect(Self.didStopFrames(in: receivedEvents) == [0])
+
+        await Task.yield()
+
+        #expect(Self.didStopFrames(in: receivedEvents) == [0])
     }
 
     @Test @MainActor func stopAfterTerminalFailureDoesNotEmitDidStop() async {

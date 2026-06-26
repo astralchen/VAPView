@@ -37,6 +37,7 @@ public final class VAPView: UIView {
 
     private var player: VAPPlayer?
     private var playTask: Task<Void, Never>?
+    private var playbackGeneration: Int = 0
     private var gestureHandlers: [(gesture: UIGestureRecognizer, handler: (UIGestureRecognizer) -> Void)] = []
 
     // MARK: - Init
@@ -220,6 +221,8 @@ public final class VAPView: UIView {
         if let shouldStartPlayback, !shouldStartPlayback(playbackConfiguration) { return }
 
         // Stop any existing playback but keep player/metalView alive for reuse.
+        playbackGeneration &+= 1
+        let generation = playbackGeneration
         playTask?.cancel()
         playTask = nil
         player?.stopForReplacement()
@@ -229,7 +232,7 @@ public final class VAPView: UIView {
 
         // Wrap caller's eventHandler to handle automatic teardown internally.
         let wrappedEventHandler: ((VAPEvent) -> Void)? = { [weak self] event in
-            guard let self else { return }
+            guard let self, self.playbackGeneration == generation else { return }
             eventHandler?(event)
             switch event {
             case .didFinish, .didStop:
@@ -246,14 +249,18 @@ public final class VAPView: UIView {
             playTask = Task { @MainActor [weak self] in
                 do {
                     let localPath = try await loader.resolveLocalPath(for: remoteConfiguration.source) { progress in
+                        guard let self, self.playbackGeneration == generation else { return }
                         wrappedEventHandler?(.downloading(progress: progress))
                     }
-                    guard let self, !Task.isCancelled else { return }
+                    guard let self, !Task.isCancelled, self.playbackGeneration == generation else { return }
                     var localConfiguration = remoteConfiguration
                     localConfiguration.source = localPath
                     self.player?.play(localConfiguration, eventHandler: wrappedEventHandler)
                     self.player?.setMuted(self.isMuted)
+                } catch is CancellationError {
+                    return
                 } catch {
+                    guard let self, !Task.isCancelled, self.playbackGeneration == generation else { return }
                     let vapErr = error as? VAPError ?? .unknown(error.localizedDescription)
                     wrappedEventHandler?(.didFail(vapErr))
                 }
@@ -293,9 +300,12 @@ public final class VAPView: UIView {
     }
 
     public func stop() {
+        let generationBeforeStop = playbackGeneration
         playTask?.cancel()
         playTask = nil
         player?.stop()
+        guard playbackGeneration == generationBeforeStop else { return }
+        playbackGeneration &+= 1
         teardown()
     }
 

@@ -138,7 +138,7 @@ public final class VAPPlayer {
 
     private func stop(emitEvent shouldEmitStop: Bool) {
         let lastFrame = currentFrameIndex
-        let hasActivePlayback = playbackTask != nil
+        let hasActivePlayback = playbackTask != nil || currentConfiguration != nil
         let handler = eventHandler
 
         playbackGeneration &+= 1
@@ -303,69 +303,78 @@ public final class VAPPlayer {
                                                                   startIndex: initialDecodeEndFrame,
                                                                   totalFrames: totalFrames)
 
-                audioPlayer?.play()
-                playerLog.debug("didStart loop=\(loopIndex)")
-                emitEvent(.didStart, generation: generation)
+                do {
+                    audioPlayer?.play()
+                    playerLog.debug("didStart loop=\(loopIndex)")
+                    emitEvent(.didStart, generation: generation)
 
-                var frameIndex = cycleStartFrame
+                    var frameIndex = cycleStartFrame
 
-                // Inner render loop
-                while frameIndex < totalFrames {
-                    if Task.isCancelled {
-                        decodeProducerTask.cancel()
-                        stopAudio()
-                        await decoder.invalidate()
-                        return
+                    // Inner render loop
+                    while frameIndex < totalFrames {
+                        if Task.isCancelled {
+                            decodeProducerTask.cancel()
+                            await decodeProducerTask.value
+                            stopAudio()
+                            await decoder.invalidate()
+                            return
+                        }
+
+                        let frameStart = CACurrentMediaTime()
+
+                        // Pop the exact presentation frame — wait up to one full frame duration before skipping.
+                        // Each retry sleeps 2 ms; ~(frameDuration / 0.002) retries max.
+                        var decodedFrame: VAPDecodedFrame?
+                        let maxRetries = max(10, Int(frameDuration / 0.002))
+                        for _ in 0..<maxRetries {
+                            decodedFrame = await decoder.popFrame(at: frameIndex)
+                            if decodedFrame != nil { break }
+                            try await Task.sleep(nanoseconds: 2_000_000)
+                        }
+                        guard let frame = decodedFrame else {
+                            // Decoder stalled beyond one frame budget — skip to keep timing.
+                            playerLog.debug("frame \(frameIndex) stalled; skipping")
+                            frameIndex += 1
+                            continue
+                        }
+
+                        // Render
+                        if frameIndex == 0 { playerLog.debug("rendering first frame via \(usesAttachmentRenderer ? "VAP" : "HWD") path") }
+                        if let splitAlphaRenderer {
+                            splitAlphaRenderer.render(pixelBuffer: frame.pixelBuffer,
+                                                      into: metalView,
+                                                      alphaPlacement: configuration.alphaPlacement)
+                        } else if let attachmentRenderer {
+                            attachmentRenderer.render(pixelBuffer: frame.pixelBuffer,
+                                                      into: metalView,
+                                                      alphaPlacement: configuration.alphaPlacement,
+                                                      config: attachmentResources?.config,
+                                                      attachmentTextures: attachmentResources?.textures ?? [:],
+                                                      maskTexture: externalMaskTexture ?? attachmentResources?.maskTexture,
+                                                      frameIndex: frame.frameIndex)
+                        }
+
+                        emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
+
+                        frameIndex = frame.frameIndex + 1
+                        currentFrameIndex = frameIndex
+
+                        // Frame pacing
+                        let elapsed = CACurrentMediaTime() - frameStart
+                        let remaining = frameDuration - elapsed
+                        if remaining > 0.001 {
+                            try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
+                        }
                     }
-
-                    let frameStart = CACurrentMediaTime()
-
-                    // Pop the exact presentation frame — wait up to one full frame duration before skipping.
-                    // Each retry sleeps 2 ms; ~(frameDuration / 0.002) retries max.
-                    var decodedFrame: VAPDecodedFrame?
-                    let maxRetries = max(10, Int(frameDuration / 0.002))
-                    for _ in 0..<maxRetries {
-                        decodedFrame = await decoder.popFrame(at: frameIndex)
-                        if decodedFrame != nil { break }
-                        try await Task.sleep(nanoseconds: 2_000_000)
-                    }
-                    guard let frame = decodedFrame else {
-                        // Decoder stalled beyond one frame budget — skip to keep timing.
-                        playerLog.debug("frame \(frameIndex) stalled; skipping")
-                        frameIndex += 1
-                        continue
-                    }
-
-                    // Render
-                    if frameIndex == 0 { playerLog.debug("rendering first frame via \(usesAttachmentRenderer ? "VAP" : "HWD") path") }
-                    if let splitAlphaRenderer {
-                        splitAlphaRenderer.render(pixelBuffer: frame.pixelBuffer,
-                                                  into: metalView,
-                                                  alphaPlacement: configuration.alphaPlacement)
-                    } else if let attachmentRenderer {
-                        attachmentRenderer.render(pixelBuffer: frame.pixelBuffer,
-                                                  into: metalView,
-                                                  alphaPlacement: configuration.alphaPlacement,
-                                                  config: attachmentResources?.config,
-                                                  attachmentTextures: attachmentResources?.textures ?? [:],
-                                                  maskTexture: externalMaskTexture ?? attachmentResources?.maskTexture,
-                                                  frameIndex: frame.frameIndex)
-                    }
-
-                    emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
-
-                    frameIndex = frame.frameIndex + 1
-                    currentFrameIndex = frameIndex
-
-                    // Frame pacing
-                    let elapsed = CACurrentMediaTime() - frameStart
-                    let remaining = frameDuration - elapsed
-                    if remaining > 0.001 {
-                        try await Task.sleep(nanoseconds: UInt64(remaining * 1_000_000_000))
-                    }
+                    decodeProducerTask.cancel()
+                    await decodeProducerTask.value
+                } catch {
+                    decodeProducerTask.cancel()
+                    await decodeProducerTask.value
+                    stopAudio()
+                    await decoder.invalidate()
+                    throw error
                 }
-                decodeProducerTask.cancel()
-                await decodeProducerTask.value
 
                 stopAudio()
 
