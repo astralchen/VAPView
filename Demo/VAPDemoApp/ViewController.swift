@@ -251,19 +251,19 @@ final class ViewController: UIViewController {
         progressBar.progress = 0
         setStatus("Starting - \(alphaPlacementTitle(alphaPlacement))")
 
-        let config = VAPPlayConfig(
-            filePath: effect.url,
+        let playbackConfiguration = VAPPlaybackConfiguration(
+            source: effect.url,
             alphaPlacement: alphaPlacement,
             backgroundPolicy: .pauseAndResume,
             contentMode: .aspectFit,
             loopCount: 1
         )
 
-        vapView.play(config: config) { [weak self] event in
+        vapView.play(playbackConfiguration, eventHandler: { [weak self] event in
             DispatchQueue.main.async {
                 self?.handlePlaybackEvent(event, giftName: effect.name)
             }
-        }
+        })
     }
 
     private func handlePlaybackEvent(_ event: VAPEvent, giftName: String) {

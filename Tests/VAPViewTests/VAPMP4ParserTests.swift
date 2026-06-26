@@ -189,7 +189,7 @@ struct VAPMP4ParserTests {
 
     @Test func parseMissingFile() {
         #expect(throws: (any Error).self) {
-            try VAPMP4Parser.parse(filePath: "/nonexistent/file.mp4")
+            try VAPMP4Parser.parse(localFilePath: "/nonexistent/file.mp4")
         }
     }
 }

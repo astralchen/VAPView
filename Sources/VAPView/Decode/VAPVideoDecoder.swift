@@ -20,7 +20,7 @@ actor VAPVideoDecoder {
     init(info: VAPMP4Info, bufferCapacity: Int) {
         self.info  = info
         self.buffer = VAPFrameBufferActor(capacity: bufferCapacity)
-        self.fileHandle = FileHandle(forReadingAtPath: info.filePath)
+        self.fileHandle = FileHandle(forReadingAtPath: info.localFilePath)
     }
 
     /// Must be called immediately after init before any decode calls.

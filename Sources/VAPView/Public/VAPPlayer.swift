@@ -8,9 +8,9 @@ import AVFoundation
 
 // MARK: - Configuration
 
-public struct VAPPlayConfig: Sendable {
+public struct VAPPlaybackConfiguration: Sendable {
     /// Source file path or URL string
-    public var filePath: String
+    public var source: String
     /// Alpha channel position in the video frame.
     ///
     /// Only takes effect when the MP4 does **not** contain a `vapc` box with
@@ -26,13 +26,13 @@ public struct VAPPlayConfig: Sendable {
     /// Optional image loader for network/local URL attachments
     public var imageLoader: VAPAttachmentImageLoader?
     /// Decode buffer depth (default 3)
-    public var bufferCount: Int
+    public var frameBufferCapacity: Int
     /// Override FPS (0 = use MP4 header value)
-    public var fps: Int
+    public var preferredFramesPerSecond: Int
     /// Whether to play audio track if present
-    public var playAudio: Bool
+    public var playsAudio: Bool
     /// Optional external mask applied over every frame (VAP renderer path only)
-    public var maskInfo: VAPMaskConfiguration?
+    public var mask: VAPMaskConfiguration?
     /// Number of times to play. 1 = once (default), 0 = infinite, N = N times.
     /// Loop is handled inside the player — no Metal/texture teardown between cycles.
     ///
@@ -42,28 +42,28 @@ public struct VAPPlayConfig: Sendable {
     ///   decoder, audio player) until the `VAPPlayer` is deallocated.
     public var loopCount: Int
 
-    public init(filePath: String,
+    public init(source: String,
                 alphaPlacement: VAPAlphaPlacement = .right,
                 backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
                 contentMode: VAPContentMode = .scaleToFill,
                 attachmentSources: [String: VAPAttachmentSource] = [:],
                 imageLoader: VAPAttachmentImageLoader? = nil,
-                bufferCount: Int = 3,
-                fps: Int = 0,
-                playAudio: Bool = true,
-                maskInfo: VAPMaskConfiguration? = nil,
+                frameBufferCapacity: Int = 3,
+                preferredFramesPerSecond: Int = 0,
+                playsAudio: Bool = true,
+                mask: VAPMaskConfiguration? = nil,
                 loopCount: Int = 1) {
-        self.filePath          = filePath
-        self.alphaPlacement    = alphaPlacement
-        self.backgroundPolicy  = backgroundPolicy
-        self.contentMode       = contentMode
-        self.attachmentSources = attachmentSources
-        self.imageLoader       = imageLoader
-        self.bufferCount       = bufferCount
-        self.fps               = fps
-        self.playAudio         = playAudio
-        self.maskInfo          = maskInfo
-        self.loopCount         = loopCount
+        self.source                   = source
+        self.alphaPlacement           = alphaPlacement
+        self.backgroundPolicy         = backgroundPolicy
+        self.contentMode              = contentMode
+        self.attachmentSources        = attachmentSources
+        self.imageLoader              = imageLoader
+        self.frameBufferCapacity      = frameBufferCapacity
+        self.preferredFramesPerSecond = preferredFramesPerSecond
+        self.playsAudio               = playsAudio
+        self.mask                     = mask
+        self.loopCount                = loopCount
     }
 }
 
@@ -92,17 +92,17 @@ public final class VAPPlayer {
     private var backgroundObserver: NSObjectProtocol?
     private var foregroundObserver: NSObjectProtocol?
 
-    private var currentConfig: VAPPlayConfig?
+    private var currentConfiguration: VAPPlaybackConfiguration?
     private var currentFrameIndex: Int = 0
-    private let mtlDevice: MTLDevice?
-    private var onEventCallback: ((VAPEvent) -> Void)?
-    private var epoch: Int = 0
+    private let metalDevice: MTLDevice?
+    private var eventHandler: ((VAPEvent) -> Void)?
+    private var playbackGeneration: Int = 0
 
     // MARK: - Init
 
     public init(frame: CGRect = .zero) {
         self.metalView = VAPMetalView(frame: frame)
-        self.mtlDevice = MTLCreateSystemDefaultDevice()
+        self.metalDevice = MTLCreateSystemDefaultDevice()
         var cont: AsyncStream<VAPEvent>.Continuation!
         self._eventStream = AsyncStream { cont = $0 }
         self._eventContinuation = cont
@@ -114,17 +114,17 @@ public final class VAPPlayer {
 
     // MARK: - Public API
 
-    public func play(config: VAPPlayConfig, onEvent: ((VAPEvent) -> Void)? = nil) {
+    public func play(_ configuration: VAPPlaybackConfiguration, eventHandler: ((VAPEvent) -> Void)? = nil) {
         stop()
-        epoch &+= 1
-        currentConfig = config
+        playbackGeneration &+= 1
+        currentConfiguration = configuration
         currentFrameIndex = 0
-        onEventCallback = onEvent
-        metalView.vapContentMode = config.contentMode
-        setupBackgroundObservers(policy: config.backgroundPolicy)
-        let myEpoch = epoch
+        self.eventHandler = eventHandler
+        metalView.vapContentMode = configuration.contentMode
+        setupBackgroundObservers(policy: configuration.backgroundPolicy)
+        let generation = playbackGeneration
         playbackTask = Task { [weak self] in
-            await self?.runPlayback(config: config, startFrame: 0, epoch: myEpoch)
+            await self?.runPlayback(configuration: configuration, startFrame: 0, generation: generation)
         }
     }
 
@@ -132,16 +132,16 @@ public final class VAPPlayer {
         playbackTask?.cancel()
         playbackTask = nil
         currentFrameIndex = 0
-        onEventCallback = nil
+        eventHandler = nil
         stopAudio()
         removeBackgroundObservers()
-        currentConfig = nil
+        currentConfiguration = nil
     }
 
-    private func emitEvent(_ event: VAPEvent, epoch: Int) {
-        guard epoch == self.epoch else { return }
+    private func emitEvent(_ event: VAPEvent, generation: Int) {
+        guard generation == self.playbackGeneration else { return }
         _eventContinuation.yield(event)
-        onEventCallback?(event)
+        eventHandler?(event)
     }
 
     public func pause() {
@@ -151,30 +151,30 @@ public final class VAPPlayer {
     }
 
     public func resume() {
-        guard let config = currentConfig else { return }
+        guard let configuration = currentConfiguration else { return }
         audioPlayer?.play()
         let startFrame = currentFrameIndex
-        let myEpoch = epoch
+        let generation = playbackGeneration
         playbackTask = Task { [weak self] in
-            await self?.runPlayback(config: config, startFrame: startFrame, epoch: myEpoch)
+            await self?.runPlayback(configuration: configuration, startFrame: startFrame, generation: generation)
         }
     }
 
-    public func setMute(_ mute: Bool) {
-        audioPlayer?.volume = mute ? 0 : 1
+    public func setMuted(_ isMuted: Bool) {
+        audioPlayer?.volume = isMuted ? 0 : 1
     }
 
     // MARK: - Playback loop
 
-    private func runPlayback(config: VAPPlayConfig, startFrame: Int = 0, epoch: Int) async {
+    private func runPlayback(configuration: VAPPlaybackConfiguration, startFrame: Int = 0, generation: Int) async {
         do {
-            playerLog.debug("runPlayback start source=\(Self.logSourceDescription(config.filePath))")
+            playerLog.debug("runPlayback start source=\(Self.logSourceDescription(configuration.source))")
             // 1. Parse MP4 on background thread
             let info: VAPMP4Info = try await Task.detached(priority: .userInitiated) {
-                try VAPMP4Parser.parse(filePath: config.filePath)
+                try VAPMP4Parser.parse(localFilePath: configuration.source)
             }.value
             playerLog.debug("parsed: frames=\(info.frameCount) fps=\(info.fps) size=\(info.width)x\(info.height) hasAudio=\(info.hasAudioTrack) vapc=\(info.vapcJSON != nil)")
-            playerLog.debug("config: alphaPlacement=\(config.alphaPlacement.rawValue) contentMode=\(config.contentMode) loopCount=\(config.loopCount)")
+            playerLog.debug("configuration: alphaPlacement=\(configuration.alphaPlacement.rawValue) contentMode=\(configuration.contentMode) loopCount=\(configuration.loopCount)")
 
             // 2. Validate VAP version
             if let jsonData = info.vapcJSON {
@@ -185,7 +185,7 @@ public final class VAPPlayer {
             }
 
             // 3. Metal device (cached at init) + renderer (reused across all loop cycles)
-            guard let device = mtlDevice else {
+            guard let device = metalDevice else {
                 playerLog.error("Metal device unavailable")
                 throw VAPError.metalUnavailable
             }
@@ -200,8 +200,8 @@ public final class VAPPlayer {
             var attachResources: VAPAttachmentResources?
             if useVAPPath, let jsonData = info.vapcJSON {
                 let _device = device
-                let _loader = config.imageLoader
-                let _sources = config.attachmentSources
+                let _loader = configuration.imageLoader
+                let _sources = configuration.attachmentSources
                 attachResources = try await Task.detached(priority: .userInitiated) {
                     let mgr = VAPConfigManager(device: _device, imageLoader: _loader)
                     return try await mgr.load(vapcJSON: jsonData, sources: _sources)
@@ -210,23 +210,23 @@ public final class VAPPlayer {
             }
 
             // 4b. External mask override (VAPMaskConfiguration -> MTLTexture, reused across all loop cycles)
-            let externalMaskTexture: MTLTexture? = config.maskInfo.flatMap {
+            let externalMaskTexture: MTLTexture? = configuration.mask.flatMap {
                 Self.makeTexture(from: $0, device: device)
             }
 
             // Loop state
-            let loopCount = config.loopCount  // 0 = infinite
+            let loopCount = configuration.loopCount  // 0 = infinite
             var loopIndex = 0
 
             // 5. Create decoder (reset between cycles, not recreated)
             let reorderBufferDepth = Self.requiredBufferDepth(for: info.videoSamples)
-            let bufCount    = max(max(1, config.bufferCount), reorderBufferDepth)
+            let bufCount    = max(max(1, configuration.frameBufferCapacity), reorderBufferDepth)
             let decoder     = VAPVideoDecoder(info: info, bufferCapacity: bufCount)
             try await decoder.prepare()
             playerLog.debug("decoder prepared bufCount=\(bufCount) totalFrames=\(info.frameCount)")
 
-            let fps = config.fps > 0
-                ? config.fps
+            let fps = configuration.preferredFramesPerSecond > 0
+                ? configuration.preferredFramesPerSecond
                 : max(
                     VAPPlaybackDefaults.minimumFramesPerSecond,
                     min(info.fps, VAPPlaybackDefaults.maximumFramesPerSecond)
@@ -236,8 +236,8 @@ public final class VAPPlayer {
             playerLog.debug("fps=\(fps) frameDuration=\(frameDuration)")
 
             // Audio — create once, reused across all loop cycles
-            if config.playAudio && info.hasAudioTrack {
-                setupAudio(filePath: config.filePath)
+            if configuration.playsAudio && info.hasAudioTrack {
+                setupAudio(localFilePath: configuration.source)
             }
 
             // 6. Outer loop — Metal/texture/audio objects are reused across all cycles
@@ -264,7 +264,7 @@ public final class VAPPlayer {
 
                 audioPlayer?.play()
                 playerLog.debug("didStart loop=\(loopIndex)")
-                emitEvent(.didStart, epoch: epoch)
+                emitEvent(.didStart, generation: generation)
 
                 var frameIndex = cycleStart
 
@@ -274,7 +274,7 @@ public final class VAPPlayer {
                         decodeProducer.cancel()
                         stopAudio()
                         playerLog.debug("didStop lastFrame=\(frameIndex)")
-                        emitEvent(.didStop(lastFrame: frameIndex), epoch: epoch)
+                        emitEvent(.didStop(lastFrame: frameIndex), generation: generation)
                         await decoder.invalidate()
                         return
                     }
@@ -302,18 +302,18 @@ public final class VAPPlayer {
                     if let hwd = hwdRenderer {
                         hwd.render(pixelBuffer: frame.pixelBuffer,
                                    into: metalView,
-                                   alphaPlacement: config.alphaPlacement)
+                                   alphaPlacement: configuration.alphaPlacement)
                     } else if let vap = vapRenderer {
                         vap.render(pixelBuffer: frame.pixelBuffer,
                                    into: metalView,
-                                   alphaPlacement: config.alphaPlacement,
+                                   alphaPlacement: configuration.alphaPlacement,
                                    config: attachResources?.config,
                                    attachmentTextures: attachResources?.textures ?? [:],
                                    maskTexture: externalMaskTexture ?? attachResources?.maskTexture,
                                    frameIndex: frame.frameIndex)
                     }
 
-                    emitEvent(.didPlayFrame(index: frame.frameIndex), epoch: epoch)
+                    emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
 
                     frameIndex = frame.frameIndex + 1
                     currentFrameIndex = frameIndex
@@ -334,10 +334,10 @@ public final class VAPPlayer {
                 let isLastCycle = loopCount != 0 && loopIndex >= loopCount
                 if isLastCycle {
                     playerLog.debug("didFinish totalFrames=\(totalFrames)")
-                    emitEvent(.didFinish(totalFrames: totalFrames), epoch: epoch)
+                    emitEvent(.didFinish(totalFrames: totalFrames), generation: generation)
                 } else {
                     playerLog.debug("didLoopFinish loop=\(loopIndex) totalFrames=\(totalFrames)")
-                    emitEvent(.didLoopFinish(loop: loopIndex, totalFrames: totalFrames), epoch: epoch)
+                    emitEvent(.didLoopFinish(loop: loopIndex, totalFrames: totalFrames), generation: generation)
                 }
 
             } while loopCount == 0 || loopIndex < loopCount
@@ -346,11 +346,11 @@ public final class VAPPlayer {
 
         } catch let error as VAPError {
             playerLog.error("VAPError: \(Self.logDescription(for: error))")
-            emitEvent(.didFail(error), epoch: epoch)
+            emitEvent(.didFail(error), generation: generation)
         } catch {
             if !Task.isCancelled {
                 playerLog.error("Unknown error: \(Self.logDescription(for: error))")
-                emitEvent(.didFail(.unknown(error.localizedDescription)), epoch: epoch)
+                emitEvent(.didFail(.unknown(error.localizedDescription)), generation: generation)
             }
         }
     }
@@ -442,10 +442,10 @@ public final class VAPPlayer {
 
     // MARK: - Audio
 
-    private func setupAudio(filePath: String) {
+    private func setupAudio(localFilePath: String) {
         // AVAudioPlayer does not support network URLs — skip for remote files.
-        guard !filePath.hasPrefix("http://"), !filePath.hasPrefix("https://") else { return }
-        let url = URL(fileURLWithPath: filePath)
+        guard !localFilePath.hasPrefix("http://"), !localFilePath.hasPrefix("https://") else { return }
+        let url = URL(fileURLWithPath: localFilePath)
         audioPlayer = try? AVAudioPlayer(contentsOf: url)
         audioPlayer?.prepareToPlay()
     }
@@ -494,15 +494,15 @@ public final class VAPPlayer {
 
     // MARK: - Mask texture factory
 
-    private static func makeTexture(from maskInfo: VAPMaskConfiguration, device: MTLDevice) -> MTLTexture? {
-        let w = Int(maskInfo.dataSize.width)
-        let h = Int(maskInfo.dataSize.height)
-        guard w > 0, h > 0, maskInfo.data.count >= w * h else { return nil }
+    private static func makeTexture(from mask: VAPMaskConfiguration, device: MTLDevice) -> MTLTexture? {
+        let w = Int(mask.dataSize.width)
+        let h = Int(mask.dataSize.height)
+        guard w > 0, h > 0, mask.data.count >= w * h else { return nil }
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm, width: w, height: h, mipmapped: false)
         desc.usage = .shaderRead
         guard let texture = device.makeTexture(descriptor: desc) else { return nil }
-        maskInfo.data.withUnsafeBytes { ptr in
+        mask.data.withUnsafeBytes { ptr in
             texture.replace(
                 region: MTLRegionMake2D(0, 0, w, h),
                 mipmapLevel: 0,

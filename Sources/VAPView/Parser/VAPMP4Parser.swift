@@ -24,7 +24,7 @@ struct VAPMP4Info: Sendable {
     let hvcC: VAPHvcCData?
     let vapcJSON: Data?
     let hasAudioTrack: Bool
-    let filePath: String
+    let localFilePath: String
 
     var frameCount: Int { videoSamples.count }
 }
@@ -39,11 +39,11 @@ struct VAPMP4Parser {
     private static let kMaxSampleCount = 100_000     // 防止无界 sampleOffsets 分配
     private static let kMaxTableEntries = 100_000    // stts/ctts/stsc/stco/stsz/stss 条目上限
 
-    static func parse(filePath: String) throws -> VAPMP4Info {
-        guard FileManager.default.fileExists(atPath: filePath) else {
-            throw VAPError.fileNotFound(filePath)
+    static func parse(localFilePath: String) throws -> VAPMP4Info {
+        guard FileManager.default.fileExists(atPath: localFilePath) else {
+            throw VAPError.fileNotFound(localFilePath)
         }
-        guard let handle = FileHandle(forReadingAtPath: filePath) else {
+        guard let handle = FileHandle(forReadingAtPath: localFilePath) else {
             throw VAPError.invalidMP4File
         }
         defer { try? handle.close() }
@@ -87,7 +87,7 @@ struct VAPMP4Parser {
         return VAPMP4Info(
             codec: codec, width: width, height: height, fps: fps, duration: duration,
             videoSamples: samples, avcC: avcC, hvcC: hvcC,
-            vapcJSON: vapcJSON, hasAudioTrack: hasAudio, filePath: filePath
+            vapcJSON: vapcJSON, hasAudioTrack: hasAudio, localFilePath: localFilePath
         )
     }
 

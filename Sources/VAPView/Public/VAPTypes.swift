@@ -96,7 +96,7 @@ public struct VAPMaskConfiguration: Sendable {
 
 // MARK: - Attachment source value
 
-/// Typed value for a single attachment slot in `VAPPlayConfig.attachmentSources`.
+/// Typed value for a single attachment slot in `VAPPlaybackConfiguration.attachmentSources`.
 /// Replaces the untyped `[String: any Sendable]` dictionary values.
 public enum VAPAttachmentSource: @unchecked Sendable {
     /// A pre-loaded image — composited directly without calling the imageLoader.

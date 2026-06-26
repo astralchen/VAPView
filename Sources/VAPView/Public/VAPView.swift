@@ -21,11 +21,11 @@ public final class VAPView: UIView {
 
     /// Mutes audio when true.
     public var isMuted: Bool = false {
-        didSet { player?.setMute(isMuted) }
+        didSet { player?.setMuted(isMuted) }
     }
 
     /// Called before playback starts. Return false to cancel playback.
-    public var shouldStartPlay: ((VAPPlayConfig) -> Bool)?
+    public var shouldStartPlay: ((VAPPlaybackConfiguration) -> Bool)?
 
     /// Resource loader used to resolve remote `http(s)://` URLs to local file paths.
     /// Defaults to `VAPDiskCache.shared`. Replace with a custom implementation to
@@ -36,7 +36,7 @@ public final class VAPView: UIView {
 
     private var player: VAPPlayer?
     private var playTask: Task<Void, Never>?
-    private var onEvent: ((VAPEvent) -> Void)?
+    private var eventHandler: ((VAPEvent) -> Void)?
     private var gestureHandlers: [(UIGestureRecognizer, (UIGestureRecognizer) -> Void)] = []
 
     // MARK: - Init
@@ -116,46 +116,46 @@ public final class VAPView: UIView {
     ///
     /// The renderer automatically selects the appropriate pipeline based on the MP4 content:
     /// - **VAP path**: If the MP4 contains a `vapc` box, the renderer reads `rgbFrame`/`aFrame`
-    ///   from it to determine exact RGB and alpha regions. In this case `config.alphaPlacement` is ignored.
-    /// - **HWD path**: If no `vapc` box is present, the renderer uses `config.alphaPlacement` to
+    ///   from it to determine exact RGB and alpha regions. In this case `configuration.alphaPlacement` is ignored.
+    /// - **HWD path**: If no `vapc` box is present, the renderer uses `configuration.alphaPlacement` to
     ///   determine the alpha channel position (left/right/top/bottom 50% split).
     ///
-    /// ## VAPPlayConfig properties
+    /// ## VAPPlaybackConfiguration properties
     ///
     /// | Property | Description |
     /// |---|---|
-    /// | `filePath` | Local file path or `http(s)://` URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. |
+    /// | `source` | Local file path or `http(s)://` URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. |
     /// | `alphaPlacement` | Alpha channel position (`.left`/`.right`/`.top`/`.bottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.right`. |
     /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.ignore`. |
     /// | `contentMode` | Display scaling: `.scaleToFill` (default), `.aspectFit`, or `.aspectFill`. |
     /// | `attachmentSources` | Maps `srcId` -> ``VAPAttachmentSource`` (`.image`, `.imageURL`, `.text`) for VAP attachment slots defined in the `vapc` config. |
     /// | `imageLoader` | Custom async image loader for `.imageURL` type attachments. Required when using `.imageURL` attachment sources. |
-    /// | `bufferCount` | Decoded frame buffer depth. Default: 3. |
-    /// | `fps` | Override playback FPS. 0 (default) = use the value from MP4 header. |
-    /// | `playAudio` | Whether to play the audio track if present. Default: `true`. |
-    /// | `maskInfo` | Optional external alpha mask applied over every frame (VAP path only). |
+    /// | `frameBufferCapacity` | Decoded frame buffer depth. Default: 3. |
+    /// | `preferredFramesPerSecond` | Override playback FPS. 0 (default) = use the value from MP4 header. |
+    /// | `playsAudio` | Whether to play the audio track if present. Default: `true`. |
+    /// | `mask` | Optional external alpha mask applied over every frame (VAP path only). |
     /// | `loopCount` | Playback repeat count. 1 = once (default), 0 = infinite, N = N times. When `0`, `.didFinish` is never emitted — call `stop()` explicitly. |
     ///
     /// ## Examples
     ///
     /// **Basic — play a local file (HWD path, alphaPlacement takes effect):**
     /// ```swift
-    /// let config = VAPPlayConfig(
-    ///     filePath: Bundle.main.path(forResource: "animation", ofType: "mp4")!,
+    /// let playbackConfiguration = VAPPlaybackConfiguration(
+    ///     source: Bundle.main.path(forResource: "animation", ofType: "mp4")!,
     ///     alphaPlacement: .right
     /// )
-    /// vapView.play(config: config)
+    /// vapView.play(playbackConfiguration)
     /// ```
     ///
     /// **Remote URL with progress and event handling:**
     /// ```swift
-    /// let config = VAPPlayConfig(
-    ///     filePath: "https://example.com/gift.mp4",
+    /// let playbackConfiguration = VAPPlaybackConfiguration(
+    ///     source: "https://example.com/gift.mp4",
     ///     backgroundPolicy: .pauseAndResume,
     ///     contentMode: .aspectFit,
     ///     loopCount: 3
     /// )
-    /// vapView.play(config: config) { event in
+    /// vapView.play(playbackConfiguration) { event in
     ///     switch event {
     ///     case .downloading(let progress):
     ///         print("downloading: \(Int(progress * 100))%")
@@ -177,8 +177,8 @@ public final class VAPView: UIView {
     ///
     /// **VAP path with dynamic attachments (images, text overlays):**
     /// ```swift
-    /// let config = VAPPlayConfig(
-    ///     filePath: "https://example.com/vapx_animation.mp4",
+    /// let playbackConfiguration = VAPPlaybackConfiguration(
+    ///     source: "https://example.com/vapx_animation.mp4",
     ///     contentMode: .aspectFit,
     ///     attachmentSources: [
     ///         "avatar": .image(UIImage(named: "avatar")!),
@@ -191,42 +191,44 @@ public final class VAPView: UIView {
     ///         return UIImage(data: data) ?? UIImage()
     ///     }
     /// )
-    /// vapView.play(config: config)
+    /// vapView.play(playbackConfiguration)
     /// ```
     ///
     /// **External mask overlay (VAP path only):**
     /// ```swift
     /// let maskData = Data(repeating: 0xFF, count: 200 * 200) // R8 grayscale
-    /// let config = VAPPlayConfig(
-    ///     filePath: "path/to/animation.mp4",
-    ///     maskInfo: VAPMaskConfiguration(data: maskData, dataSize: CGSize(width: 200, height: 200))
+    /// let playbackConfiguration = VAPPlaybackConfiguration(
+    ///     source: "path/to/animation.mp4",
+    ///     mask: VAPMaskConfiguration(data: maskData, dataSize: CGSize(width: 200, height: 200))
     /// )
-    /// vapView.play(config: config)
+    /// vapView.play(playbackConfiguration)
     /// ```
     ///
     /// - Parameters:
-    ///   - config: Full play configuration. See property table above.
-    ///   - onEvent: Optional closure called for each ``VAPEvent``.
-    public func play(config: VAPPlayConfig, onEvent: ((VAPEvent) -> Void)? = nil) {
-        var cfg = config
-        cfg.fps = fps > 0 ? fps : config.fps
+    ///   - configuration: Full play configuration. See property table above.
+    ///   - eventHandler: Optional closure called for each ``VAPEvent``.
+    public func play(_ configuration: VAPPlaybackConfiguration, eventHandler: ((VAPEvent) -> Void)? = nil) {
+        var activeConfiguration = configuration
+        activeConfiguration.preferredFramesPerSecond = fps > 0
+            ? fps
+            : configuration.preferredFramesPerSecond
 
         // shouldStart gate
-        if let gate = shouldStartPlay, !gate(cfg) { return }
+        if let gate = shouldStartPlay, !gate(activeConfiguration) { return }
 
         // Stop any existing playback but keep player/metalView alive for reuse.
         playTask?.cancel()
         playTask = nil
         player?.stop()
-        self.onEvent = onEvent
+        self.eventHandler = eventHandler
 
         ensurePlayer()
         guard let p = player else { return }
 
-        // Wrap caller's onEvent to handle autoDestroyAfterFinish internally.
-        let wrappedOnEvent: ((VAPEvent) -> Void)? = { [weak self] event in
+        // Wrap caller's eventHandler to handle autoDestroyAfterFinish internally.
+        let wrappedEventHandler: ((VAPEvent) -> Void)? = { [weak self] event in
             guard let self else { return }
-            onEvent?(event)
+            eventHandler?(event)
             switch event {
             case .didFinish, .didStop:
                 if self.autoDestroyAfterFinish { self.teardown() }
@@ -235,27 +237,28 @@ public final class VAPView: UIView {
             }
         }
 
-        let isRemote = cfg.filePath.hasPrefix("http://") || cfg.filePath.hasPrefix("https://")
+        let isRemote = activeConfiguration.source.hasPrefix("http://") || activeConfiguration.source.hasPrefix("https://")
         if isRemote {
             let loader = resourceLoader
+            let remoteConfiguration = activeConfiguration
             playTask = Task { @MainActor [weak self] in
                 do {
-                    let localPath = try await loader.localPath(for: cfg.filePath, onProgress: { progress in
-                        wrappedOnEvent?(.downloading(progress: progress))
+                    let localPath = try await loader.localPath(for: remoteConfiguration.source, onProgress: { progress in
+                        wrappedEventHandler?(.downloading(progress: progress))
                     })
                     guard let self, !Task.isCancelled else { return }
-                    var localCfg = cfg
-                    localCfg.filePath = localPath
-                    self.player?.play(config: localCfg, onEvent: wrappedOnEvent)
-                    self.player?.setMute(self.isMuted)
+                    var localConfiguration = remoteConfiguration
+                    localConfiguration.source = localPath
+                    self.player?.play(localConfiguration, eventHandler: wrappedEventHandler)
+                    self.player?.setMuted(self.isMuted)
                 } catch {
                     let vapErr = error as? VAPError ?? .unknown(error.localizedDescription)
-                    wrappedOnEvent?(.didFail(vapErr))
+                    wrappedEventHandler?(.didFail(vapErr))
                 }
             }
         } else {
-            p.play(config: cfg, onEvent: wrappedOnEvent)
-            p.setMute(isMuted)
+            p.play(activeConfiguration, eventHandler: wrappedEventHandler)
+            p.setMuted(isMuted)
         }
     }
 
@@ -266,23 +269,25 @@ public final class VAPView: UIView {
                      contentMode: VAPContentMode = .scaleToFill,
                      attachmentSources: [String: VAPAttachmentSource] = [:],
                      imageLoader: VAPAttachmentImageLoader? = nil,
-                     bufferCount: Int = 3,
-                     maskInfo: VAPMaskConfiguration? = nil,
-                     playAudio: Bool = true,
-                     onEvent: ((VAPEvent) -> Void)? = nil) {
-        let config = VAPPlayConfig(
-            filePath: filePath,
+                     frameBufferCapacity: Int = 3,
+                     mask: VAPMaskConfiguration? = nil,
+                     playsAudio: Bool = true,
+                     loopCount: Int = 1,
+                     eventHandler: ((VAPEvent) -> Void)? = nil) {
+        let playbackConfiguration = VAPPlaybackConfiguration(
+            source: filePath,
             alphaPlacement: alphaPlacement,
             backgroundPolicy: backgroundPolicy,
             contentMode: contentMode,
             attachmentSources: attachmentSources,
             imageLoader: imageLoader,
-            bufferCount: bufferCount,
-            fps: fps,
-            playAudio: playAudio,
-            maskInfo: maskInfo
+            frameBufferCapacity: frameBufferCapacity,
+            preferredFramesPerSecond: fps,
+            playsAudio: playsAudio,
+            mask: mask,
+            loopCount: loopCount
         )
-        play(config: config, onEvent: onEvent)
+        play(playbackConfiguration, eventHandler: eventHandler)
     }
 
     public func stop() {

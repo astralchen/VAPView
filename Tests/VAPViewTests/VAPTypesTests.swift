@@ -48,6 +48,34 @@ struct VAPTypesTests {
         #expect(VAPPlaybackDefaults.defaultFramesPerSecond < VAPPlaybackDefaults.maximumFramesPerSecond)
     }
 
+    @Test func playbackConfigurationStoresRenamedFields() {
+        let maskData = Data([1, 1, 1, 1])
+        let mask = VAPMaskConfiguration(data: maskData, dataSize: CGSize(width: 2, height: 2))
+        let configuration = VAPPlaybackConfiguration(
+            source: "https://example.com/gift.mp4",
+            alphaPlacement: .left,
+            backgroundPolicy: .pauseAndResume,
+            contentMode: .aspectFit,
+            attachmentSources: ["avatar": .imageURL("https://example.com/avatar.png")],
+            imageLoader: nil,
+            frameBufferCapacity: 5,
+            preferredFramesPerSecond: 30,
+            playsAudio: false,
+            mask: mask,
+            loopCount: 3
+        )
+
+        #expect(configuration.source == "https://example.com/gift.mp4")
+        #expect(configuration.alphaPlacement == .left)
+        #expect(configuration.backgroundPolicy == .pauseAndResume)
+        #expect(configuration.contentMode == .aspectFit)
+        #expect(configuration.frameBufferCapacity == 5)
+        #expect(configuration.preferredFramesPerSecond == 30)
+        #expect(configuration.playsAudio == false)
+        #expect(configuration.mask?.data == maskData)
+        #expect(configuration.loopCount == 3)
+    }
+
     // MARK: - VAPEvent
 
     @Test func eventDidPlayFrame() {
