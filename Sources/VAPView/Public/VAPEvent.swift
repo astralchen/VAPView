@@ -4,7 +4,7 @@
 
 import Foundation
 
-/// All playback lifecycle events emitted via AsyncStream, replacing delegate callbacks.
+/// All playback lifecycle events emitted via AsyncStream and event handlers.
 public enum VAPEvent: Sendable {
     /// Playback started (first frame displayed)
     case didStart
@@ -16,7 +16,7 @@ public enum VAPEvent: Sendable {
     case didFinish(totalFrames: Int)
     /// Playback was stopped externally
     case didStop(lastFrame: Int)
-    /// Remote resource is being downloaded (only emitted for `http(s)://` filePaths)
+    /// Remote source is being resolved or downloaded by the configured resource loader
     case downloading(progress: Double)
     /// An error occurred
     case didFail(VAPError)

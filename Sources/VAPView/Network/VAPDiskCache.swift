@@ -170,12 +170,12 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
     @concurrent func download(url: URL,
                               destination: URL,
                               progressHandler: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
-        try await withCheckedThrowingContinuation { cont in
+        try await withCheckedThrowingContinuation { continuation in
             let task = session.downloadTask(with: url)
             lock.lock()
             handlers[task.taskIdentifier] = DownloadRequest(destination: destination,
                                                             progressHandler: progressHandler,
-                                                            continuation: cont)
+                                                            continuation: continuation)
             lock.unlock()
             task.resume()
         }

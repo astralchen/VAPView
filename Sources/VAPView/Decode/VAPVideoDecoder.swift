@@ -121,9 +121,9 @@ actor VAPVideoDecoder {
         // we wrap it in a Sendable box to satisfy Swift 6.
         var flags = VTDecodeInfoFlags()
         let decodeFlags: VTDecodeFrameFlags = [._EnableAsynchronousDecompression]
-        let pixelBuffer: CVPixelBuffer = try await withCheckedThrowingContinuation { (cont: CheckedContinuation<CVPixelBuffer, any Error>) in
-            let callbackData = DecodeCallbackData(continuation: cont)
-            let unmanagedRef = Unmanaged.passRetained(callbackData)
+        let pixelBuffer: CVPixelBuffer = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<CVPixelBuffer, any Error>) in
+            let continuationBox = DecodeContinuationBox(continuation: continuation)
+            let unmanagedRef = Unmanaged.passRetained(continuationBox)
             let decStatus = VTDecompressionSessionDecodeFrame(
                 session,
                 sampleBuffer: sampleBuffer,
@@ -132,13 +132,13 @@ actor VAPVideoDecoder {
                 outputHandler: { status, _, pixBuf, _, _ in
                     let ref = unmanagedRef
                     defer { ref.release() }
-                    let cb = ref.takeUnretainedValue()
+                    let continuationBox = ref.takeUnretainedValue()
                     if status == noErr, let pixBuf {
                         decoderLog.debug("VT outputHandler: got pixBuf index=\(index)")
-                        cb.continuation.resume(returning: SendableCVPixelBuffer(pixBuf).value)
+                        continuationBox.continuation.resume(returning: SendableCVPixelBuffer(pixBuf).value)
                     } else {
                         decoderLog.error("VT outputHandler: failed index=\(index) status=\(status) pixBuf=\(pixBuf == nil ? "nil" : "ok")")
-                        cb.continuation.resume(
+                        continuationBox.continuation.resume(
                             throwing: VAPError.decodeFailed(
                                 NSError(domain: "VAPDecoder", code: Int(status))
                             )
@@ -148,7 +148,7 @@ actor VAPVideoDecoder {
             )
             if decStatus != noErr {
                 unmanagedRef.release()
-                cont.resume(throwing: VAPError.decodeFailed(
+                continuation.resume(throwing: VAPError.decodeFailed(
                     NSError(domain: "VAPDecoder", code: Int(decStatus))))
             }
         }
@@ -159,7 +159,7 @@ actor VAPVideoDecoder {
         await buffer.push(frame)
         if index < 3 {
             let count = await buffer.count
-            decoderLog.debug("decoded+pushed sample \(index) presentation=\(sample.presentationIndex) bufCount=\(count)")
+            decoderLog.debug("decoded+pushed sample \(index) presentation=\(sample.presentationIndex) bufferedFrameCount=\(count)")
         }
     }
 
@@ -175,7 +175,7 @@ actor VAPVideoDecoder {
         await buffer.popFrame(at: targetIndex)
     }
 
-    func bufferCount() async -> Int {
+    func bufferedFrameCount() async -> Int {
         await buffer.count
     }
 
@@ -332,9 +332,9 @@ private struct SendableCVPixelBuffer: @unchecked Sendable {
     init(_ pb: CVPixelBuffer) { self.value = pb }
 }
 
-// MARK: - Callback helper (reference type for Unmanaged)
+// MARK: - Continuation helper (reference type for Unmanaged)
 
-private final class DecodeCallbackData: @unchecked Sendable {
+private final class DecodeContinuationBox: @unchecked Sendable {
     let continuation: CheckedContinuation<CVPixelBuffer, any Error>
     init(continuation: CheckedContinuation<CVPixelBuffer, any Error>) {
         self.continuation = continuation

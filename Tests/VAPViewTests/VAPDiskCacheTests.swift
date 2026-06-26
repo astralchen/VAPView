@@ -268,7 +268,7 @@ struct VAPDiskCacheTests {
         #expect(secondProgress.last == 1.0)
     }
 
-    // MARK: Progress callback
+    // MARK: Progress handler
 
     @Test @MainActor func progressCallbackFired() async throws {
         mockShouldFail = false

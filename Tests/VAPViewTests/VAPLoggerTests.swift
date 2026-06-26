@@ -68,13 +68,17 @@ struct VAPLoggerTests {
         defer { VAPLogging.resetConfiguration() }
 
         VAPLogger(module: .player).error(
-            "filePath=/Users/sondra/Library/Caches/private.mp4 url=https://example.com/video.mp4?token=secret"
+            "filePath=/Users/sondra/Library/Caches/private.mp4 localFilePath=/private/tmp/local.mp4 path=/private/tmp/path.mp4 source=/private/tmp/source.mp4 url=https://example.com/video.mp4?token=secret"
         )
 
         let message = collector.records.first?.message ?? ""
         #expect(message.contains("filePath=<redacted-path>"))
+        #expect(message.contains("localFilePath=<redacted-path>"))
+        #expect(message.contains("path=<redacted-path>"))
+        #expect(message.contains("source=<redacted-path>"))
         #expect(message.contains("https://example.com/video.mp4?<redacted-query>"))
         #expect(!message.contains("/Users/sondra"))
+        #expect(!message.contains("/private/tmp"))
         #expect(!message.contains("token=secret"))
     }
 

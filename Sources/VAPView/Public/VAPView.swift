@@ -333,9 +333,9 @@ public final class VAPView: UIView {
         playTask?.cancel()
         playTask = nil
         // Remove gestures before removing metalView so they can be re-attached later.
-        if let mv = player?.metalView {
-            for (gesture, _) in gestureHandlers { mv.removeGestureRecognizer(gesture) }
-            mv.removeFromSuperview()
+        if let metalView = player?.metalView {
+            for (gesture, _) in gestureHandlers { metalView.removeGestureRecognizer(gesture) }
+            metalView.removeFromSuperview()
         }
         player = nil
     }

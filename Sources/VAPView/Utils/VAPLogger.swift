@@ -109,7 +109,7 @@ private enum VAPLogSanitizer {
 
     private static func redactPaths(in message: String) -> String {
         guard let regex = try? NSRegularExpression(
-            pattern: #"\b(filePath|path)=([^\s]+)"#,
+            pattern: #"\b(filePath|localFilePath|path|source)=([^\s]+)"#,
             options: [.caseInsensitive]
         ) else {
             return message

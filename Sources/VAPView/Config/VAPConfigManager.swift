@@ -33,19 +33,19 @@ final class VAPConfigManager {
         let config = try JSONDecoder().decode(VAPConfig.self, from: vapcJSON)
         var textures: [String: MTLTexture] = [:]
 
-        for srcInfo in config.src ?? [] {
-            let srcType = srcInfo.attachmentSourceType
-            switch srcType {
+        for sourceInfo in config.src ?? [] {
+            let sourceType = sourceInfo.attachmentSourceType
+            switch sourceType {
             case .image, .imageURL:
                 let context = VAPAttachmentImageContext(
-                    sourceID: srcInfo.srcId,
-                    contentMode: srcInfo.attachmentFitType.publicContentMode,
-                    targetSize: srcInfo.w.flatMap { w in srcInfo.h.map { h in CGSize(width: w, height: h) } },
-                    loadLocation: srcInfo.attachmentLoadType?.publicLocation)
-                switch sources[srcInfo.srcId] {
-                case .image(let img):
-                    if let tex = makeTexture(from: img) {
-                        textures[srcInfo.srcId] = tex
+                    sourceID: sourceInfo.srcId,
+                    contentMode: sourceInfo.attachmentFitType.publicContentMode,
+                    targetSize: sourceInfo.w.flatMap { w in sourceInfo.h.map { h in CGSize(width: w, height: h) } },
+                    loadLocation: sourceInfo.attachmentLoadType?.publicLocation)
+                switch sources[sourceInfo.srcId] {
+                case .image(let image):
+                    if let texture = makeTexture(from: image) {
+                        textures[sourceInfo.srcId] = texture
                     }
                 case .imageURL(let urlString):
                     // [M4] 只允许 https/http/file scheme，防止 SSRF 类攻击
@@ -55,30 +55,30 @@ final class VAPConfigManager {
                     }
                     // [BUG-C2] imageLoader 为 nil 时明确报错，避免纹理缺失却无任何提示
                     guard let loader = imageLoader else {
-                        throw VAPError.unknown("imageLoader is required for .imageURL attachment (sourceID: \(srcInfo.srcId))")
+                        throw VAPError.unknown("imageLoader is required for .imageURL attachment (sourceID: \(sourceInfo.srcId))")
                     }
                     let image = try await loader(url, context)
-                    if let tex = makeTexture(from: image) {
-                        textures[srcInfo.srcId] = tex
+                    if let texture = makeTexture(from: image) {
+                        textures[sourceInfo.srcId] = texture
                     }
                 case .text, nil:
                     break
                 }
             case .text, .textString:
                 let text: String
-                switch sources[srcInfo.srcId] {
+                switch sources[sourceInfo.srcId] {
                 case .text(let t): text = t
                 case .imageURL(let s):  text = s
                 default:           text = ""
                 }
-                let size = CGSize(width: srcInfo.w ?? 100, height: srcInfo.h ?? 40)
-                let color = parseHexColor(srcInfo.txtColor) ?? .white
-                let fontSize = srcInfo.txtFontSize ?? 14
+                let size = CGSize(width: sourceInfo.w ?? 100, height: sourceInfo.h ?? 40)
+                let color = parseHexColor(sourceInfo.txtColor) ?? .white
+                let fontSize = sourceInfo.txtFontSize ?? 14
                 let image = await MainActor.run {
                     Self.renderTextImage(text: text, size: size, color: color, fontSize: fontSize)
                 }
-                if let tex = makeTexture(from: image) {
-                    textures[srcInfo.srcId] = tex
+                if let texture = makeTexture(from: image) {
+                    textures[sourceInfo.srcId] = texture
                 }
             case nil:
                 break
@@ -102,14 +102,14 @@ final class VAPConfigManager {
         let bytesPerRow = 4 * width
         var bytes = [UInt8](repeating: 0, count: bytesPerRow * height)
         let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: &bytes,
-                                  width: width, height: height,
-                                  bitsPerComponent: 8, bytesPerRow: bytesPerRow,
-                                  space: colorSpace,
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
+        guard let context = CGContext(data: &bytes,
+                                      width: width, height: height,
+                                      bitsPerComponent: 8, bytesPerRow: bytesPerRow,
+                                      space: colorSpace,
+                                      bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else {
             return nil
         }
-        ctx.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
+        context.draw(cgImage, in: CGRect(x: 0, y: 0, width: width, height: height))
         texture.replace(region: region, mipmapLevel: 0, withBytes: &bytes, bytesPerRow: bytesPerRow)
         return texture
     }
@@ -120,16 +120,16 @@ final class VAPConfigManager {
     private static func renderTextImage(text: String, size: CGSize,
                                          color: UIColor, fontSize: CGFloat) -> UIImage {
         let renderer = UIGraphicsImageRenderer(size: size)
-        return renderer.image { ctx in
-            let attrs: [NSAttributedString.Key: Any] = [
+        return renderer.image { context in
+            let attributes: [NSAttributedString.Key: Any] = [
                 .foregroundColor: color,
                 .font: UIFont.systemFont(ofSize: fontSize)
             ]
-            let str = text as NSString
-            let textSize = str.size(withAttributes: attrs)
+            let renderedText = text as NSString
+            let textSize = renderedText.size(withAttributes: attributes)
             let origin = CGPoint(x: (size.width - textSize.width) / 2,
                                  y: (size.height - textSize.height) / 2)
-            str.draw(at: origin, withAttributes: attrs)
+            renderedText.draw(at: origin, withAttributes: attributes)
         }
     }
 

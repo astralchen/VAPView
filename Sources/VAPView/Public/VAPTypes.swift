@@ -69,7 +69,7 @@ public struct VAPPlaybackDefaults: Sendable {
 
 // MARK: - External mask overlay
 ///
-/// Mirrors ObjC `QGVAPMaskInfo`. Supply raw 0/1 byte-per-pixel mask data that gets
+/// Supplies raw 0/1 byte-per-pixel mask data that gets
 /// uploaded as an R8Unorm Metal texture and composited over every rendered frame.
 /// Only effective on the VAP (attachment) renderer path.
 public struct VAPMaskConfiguration: Sendable {
