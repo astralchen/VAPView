@@ -4,14 +4,14 @@
 
 import Foundation
 
-// MARK: - Video codec
+// MARK: - 视频编码
 
 enum VAPVideoCodec: Sendable {
     case h264
     case h265
 }
 
-// MARK: - Parse result
+// MARK: - 解析结果
 
 struct VAPMP4Info: Sendable {
     let codec: VAPVideoCodec
@@ -29,7 +29,7 @@ struct VAPMP4Info: Sendable {
     var frameCount: Int { videoSamples.count }
 }
 
-// MARK: - Parser
+// MARK: - 解析器
 
 struct VAPMP4Parser {
 
@@ -52,7 +52,7 @@ struct VAPMP4Parser {
         guard let moov = root.first(where: { $0.type == "moov" }) else {
             throw VAPError.invalidMP4File
         }
-        // vapc — may be inside moov or at the top level (sibling of moov)
+        // vapc 可能在 moov 内，也可能在顶层（moov 的兄弟节点）。
         var vapcJSON: Data?
         if let vapc = moov.bfsFirst(type: "vapc"),
            case .vapc(let jsonData) = vapc.payload {
@@ -91,7 +91,7 @@ struct VAPMP4Parser {
         )
     }
 
-    // MARK: - Box tree parsing
+    // MARK: - Box 树解析
 
     static func parseBoxes(handle: FileHandle, offset: UInt64, length: UInt64?,
                                     depth: Int = 0) throws -> [VAPMP4Box] {
@@ -141,8 +141,8 @@ struct VAPMP4Parser {
             let children = try parseBoxes(handle: handle, offset: bodyOffset + 8, length: bodySize > 8 ? bodySize - 8 : 0, depth: depth + 1)
             return VAPMP4Box(type: type, payload: .container, children: children)
         case "avc1", "hvc1", "hev1", "mp4v":
-            // VisualSampleEntry: width at body+24 (2 bytes BE), height at body+26 (2 bytes BE)
-            // ObjC reads at box.startIndex+32/34 (8-byte header + 24/26 body offset)
+            // VisualSampleEntry：宽度位于 body+24（2 字节大端），高度位于 body+26（2 字节大端）。
+            // ObjC 在 box.startIndex+32/34 读取（8 字节 header + 24/26 body 偏移）。
             try? handle.seek(toOffset: bodyOffset)
             let vseData = (try? handle.read(upToCount: 28)) ?? Data()
             let w = vseData.count >= 26 ? Int(readU16BE(vseData, offset: 24)) : 0
@@ -167,7 +167,7 @@ struct VAPMP4Parser {
         }
     }
 
-    // MARK: - Leaf box parsers
+    // MARK: - 叶子 box 解析
 
     private static func parseMvhd(handle: FileHandle, offset: UInt64) throws -> VAPMP4Payload {
         try handle.seek(toOffset: offset)
@@ -253,9 +253,9 @@ struct VAPMP4Parser {
 
     private static func parseStsz(handle: FileHandle, offset: UInt64) -> VAPMP4Payload {
         try? handle.seek(toOffset: offset)
-        // stsz is a FullBox: 4 bytes version/flags + 4 bytes sample_size + 4 bytes sample_count = 12 bytes header
+        // stsz 是 FullBox：4 字节 version/flags + 4 字节 sample_size + 4 字节 sample_count = 12 字节头。
         guard let hdr = try? handle.read(upToCount: 12), hdr.count == 12 else { return .stsz(defaultSize: 0, sizes: []) }
-        let defaultSize = readU32BE(hdr, offset: 4)   // skip version/flags at offset 0
+        let defaultSize = readU32BE(hdr, offset: 4)   // 跳过 offset 0 的 version/flags
         let sampleCount = Int(readU32BE(hdr, offset: 8))
         if defaultSize > 0 { return .stsz(defaultSize: defaultSize, sizes: []) }
         // [H3] 防止无界内存分配
@@ -339,7 +339,7 @@ struct VAPMP4Parser {
         return .vapc(jsonData: data)
     }
 
-    // MARK: - Structure helpers
+    // MARK: - 结构辅助方法
 
     private static func findVideoTrak(in moov: VAPMP4Box) -> VAPMP4Box? {
         for trak in moov.allChildren(type: "trak") {
@@ -374,7 +374,7 @@ struct VAPMP4Parser {
     }
 
     private static func videoDimensions(trak: VAPMP4Box) -> (Int, Int) {
-        // Read from VisualSampleEntry (avc1/hvc1) payload parsed earlier
+        // 从前面解析出的 VisualSampleEntry（avc1/hvc1）载荷中读取。
         for boxType in ["avc1", "hvc1", "hev1", "mp4v"] {
             if let entry = trak.bfsFirst(type: boxType),
                case .visualEntry(let w, let h) = entry.payload,
@@ -385,7 +385,7 @@ struct VAPMP4Parser {
         return (0, 0)
     }
 
-    // MARK: - Sample table
+    // MARK: - 采样表
 
     private static func buildSamples(trak: VAPMP4Box, timeScale: Double) throws -> [VAPMP4Sample] {
         guard let stbl = trak.bfsFirst(type: "stbl") else { throw VAPError.streamInfoUnavailable }
@@ -502,7 +502,7 @@ struct VAPMP4Parser {
         return indices
     }
 
-    // MARK: - Byte utilities
+    // MARK: - 字节工具
 
     static func readU32BE(_ data: Data, offset: Int) -> UInt32 {
         guard offset + 4 <= data.count else { return 0 }

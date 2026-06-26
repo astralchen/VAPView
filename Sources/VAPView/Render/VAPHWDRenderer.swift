@@ -2,7 +2,7 @@
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License: http://opensource.org/licenses/MIT
 //
-// Renders alpha-split YUV video frames using the HWD Metal pipeline.
+// 使用 HWD Metal 管线渲染 alpha 分割的 YUV 视频帧。
 
 import Metal
 import MetalKit
@@ -12,14 +12,14 @@ import simd
 @MainActor
 final class VAPHWDRenderer {
 
-    // MARK: - Metal objects
+    // MARK: - Metal 对象
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let pipelineState: MTLRenderPipelineState
     private var colorParams: VAPColorParameters = .bt601Full
     private var textureCache: CVMetalTextureCache?
 
-    // MARK: - Init
+    // MARK: - 初始化
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -33,10 +33,10 @@ final class VAPHWDRenderer {
         self.textureCache = cache
     }
 
-    // MARK: - Render
+    // MARK: - 渲染
 
-    /// Render one decoded frame into `metalView`.
-    /// `alphaPlacement` determines which half of the frame contains the alpha channel.
+    /// 将一帧已解码画面渲染到 `metalView`。
+    /// `alphaPlacement` 决定帧的哪一半包含 Alpha 通道。
     func render(pixelBuffer: CVPixelBuffer,
                 into metalView: VAPMetalView,
                 alphaPlacement: VAPAlphaPlacement) {
@@ -97,7 +97,7 @@ final class VAPHWDRenderer {
         cmdBuffer.commit()
     }
 
-    // MARK: - Pipeline
+    // MARK: - 管线
 
     private static func makePipeline(device: MTLDevice) throws -> MTLRenderPipelineState {
         guard let library = try? device.makeDefaultLibrary(bundle: .module) else {
@@ -118,16 +118,16 @@ final class VAPHWDRenderer {
         return try device.makeRenderPipelineState(descriptor: desc)
     }
 
-    // MARK: - Vertex helpers
+    // MARK: - 顶点辅助方法
 
     private func makeVertices(alphaPlacement: VAPAlphaPlacement,
                               videoSize: CGSize,
                               viewRect: CGRect) -> [VAPHWDVertex] {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
-        // Normalized texture coordinates depend on alpha placement
+        // 归一化纹理坐标取决于 alphaPlacement。
         let (rgbTL, rgbBR, alphaTL, alphaBR) = Self.texCoords(alphaPlacement: alphaPlacement)
-        // 4 vertices: TL, TR, BL, BR (triangle strip)
+        // 4 个顶点：TL、TR、BL、BR（三角带）。
         return [
             VAPHWDVertex(position: SIMD4(l, t, 0, 1),
                          rgbTexCoord:   SIMD2(rgbTL.x,   rgbTL.y),
@@ -144,8 +144,8 @@ final class VAPHWDRenderer {
         ]
     }
 
-    /// Returns (rgbTopLeft, rgbBottomRight, alphaTopLeft, alphaBottomRight)
-    /// in normalized UV space [0,1].
+    /// 返回归一化 UV 空间 [0,1] 中的
+    /// (rgbTopLeft, rgbBottomRight, alphaTopLeft, alphaBottomRight)。
     static func texCoords(alphaPlacement: VAPAlphaPlacement)
         -> (SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>) {
         switch alphaPlacement {

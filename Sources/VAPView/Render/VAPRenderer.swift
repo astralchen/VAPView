@@ -2,7 +2,7 @@
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License: http://opensource.org/licenses/MIT
 //
-// VAP-x renderer: composites YUV base video + attachment images/text using mask.
+// VAP-x 渲染器：使用蒙版合成 YUV 基础视频与图片/文本挂件。
 
 import Metal
 import MetalKit
@@ -13,17 +13,17 @@ import simd
 @MainActor
 final class VAPRenderer {
 
-    // MARK: - Metal objects
+    // MARK: - Metal 对象
     private let device: MTLDevice
     private let commandQueue: MTLCommandQueue
     private let yuvPipelineState: MTLRenderPipelineState
     private let attachPipelineState: MTLRenderPipelineState
     private var colorParams: VAPColorParameters = .bt601Full
     private var textureCache: CVMetalTextureCache?
-    /// 1x1 opaque white texture used as fallback when no mask is provided.
+    /// 未提供蒙版时使用的 1x1 不透明白色兜底纹理。
     private let defaultMaskTexture: MTLTexture
 
-    // MARK: - Init
+    // MARK: - 初始化
 
     init(device: MTLDevice) throws {
         self.device = device
@@ -40,7 +40,7 @@ final class VAPRenderer {
         self.defaultMaskTexture = try Self.makeWhiteTexture(device: device)
     }
 
-    // MARK: - Render
+    // MARK: - 渲染
 
     func render(pixelBuffer: CVPixelBuffer,
                 into metalView: VAPMetalView,
@@ -63,7 +63,7 @@ final class VAPRenderer {
 
         guard let cmdBuffer = commandQueue.makeCommandBuffer() else { return }
 
-        // 1. Draw base YUV layer (with optional mask)
+        // 1. 绘制基础 YUV 层（可带蒙版）。
         if let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: desc) {
             drawYUVBase(pixelBuffer: pixelBuffer,
                         alphaPlacement: alphaPlacement,
@@ -73,7 +73,7 @@ final class VAPRenderer {
             encoder.endEncoding()
         }
 
-        // 2. Draw attachment layers on top
+        // 2. 在上方绘制挂件层。
         if let config, let frameInfo = config.frame?.first(where: { $0.i == frameIndex }) {
             for item in (frameInfo.obj ?? []) {
                 guard let tex = attachmentTextures[item.srcId] else { continue }
@@ -97,7 +97,7 @@ final class VAPRenderer {
         cmdBuffer.commit()
     }
 
-    // MARK: - Draw YUV base
+    // MARK: - 绘制 YUV 基础层
 
     private func drawYUVBase(pixelBuffer: CVPixelBuffer,
                              alphaPlacement: VAPAlphaPlacement,
@@ -114,14 +114,14 @@ final class VAPRenderer {
         let vw = CVPixelBufferGetWidth(pixelBuffer)
         let vh = CVPixelBufferGetHeight(pixelBuffer)
 
-        // Determine display size and texture coordinates from vapc config or alpha placement
+        // 根据 vapc 配置或 alphaPlacement 确定显示尺寸和纹理坐标。
         let viewRect: CGRect
         let verts: [VAPSimpleVertex]
         if let info = config?.info,
            let rgbRect = info.rgbRect,
            let alphaRect = info.alphaRect,
            info.videoW > 0, info.videoH > 0 {
-            // Use canvas size (w, h) for display aspect ratio
+            // 使用画布尺寸（w, h）计算显示宽高比。
             let displaySize = CGSize(width: info.w, height: info.h)
             viewRect = metalView.vertexRect(videoSize: displaySize)
             verts = makeFullQuad(viewRect: viewRect,
@@ -154,7 +154,7 @@ final class VAPRenderer {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
-    // MARK: - Draw attachment
+    // MARK: - 绘制挂件
 
     private func drawAttachment(item: VAPSourceDisplayItem,
                                 texture: MTLTexture,
@@ -167,7 +167,7 @@ final class VAPRenderer {
         let canvasH   = CGFloat(config.info.h)
         guard viewSize.width > 0, viewSize.height > 0, canvasW > 0, canvasH > 0 else { return }
 
-        // Convert canvas rect -> NDC
+        // 将画布矩形转换为 NDC。
         let scaleX = 2.0 / canvasW
         let scaleY = 2.0 / canvasH
         let ndcX = Float(item.x * scaleX - 1.0)
@@ -175,7 +175,7 @@ final class VAPRenderer {
         let ndcW = Float(item.w * scaleX)
         let ndcH = Float(item.h * scaleY)
 
-        // Mask coords (if present)
+        // 蒙版坐标（如果存在）。
         var mTL = SIMD2<Float>(0, 0)
         var mBR = SIMD2<Float>(1, 1)
         if let mf = item.mFrame {
@@ -209,9 +209,9 @@ final class VAPRenderer {
         encoder.drawPrimitives(type: .triangleStrip, vertexStart: 0, vertexCount: 4)
     }
 
-    // MARK: - Helpers
+    // MARK: - 辅助方法
 
-    /// Creates a 1x1 R8Unorm white texture (alpha = 1.0) used as default mask.
+    /// 创建 1x1 R8Unorm 白色纹理（alpha = 1.0），作为默认蒙版。
     private static func makeWhiteTexture(device: MTLDevice) throws -> MTLTexture {
         let desc = MTLTextureDescriptor.texture2DDescriptor(
             pixelFormat: .r8Unorm, width: 1, height: 1, mipmapped: false)
@@ -225,8 +225,8 @@ final class VAPRenderer {
         return tex
     }
 
-    /// Build a quad using explicit RGB and alpha regions from vapc config.
-    /// Regions are in pixel coordinates within the video frame.
+    /// 使用 vapc 配置中的显式 RGB 和 Alpha 区域构建四边形。
+    /// 区域坐标使用视频帧内的像素坐标。
     func makeFullQuad(viewRect: CGRect,
                       rgbRect: CGRect,
                       alphaRect: CGRect,
@@ -235,7 +235,7 @@ final class VAPRenderer {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
 
-        // Normalize pixel rects to [0,1] texture coordinates
+        // 将像素矩形归一化为 [0,1] 纹理坐标。
         let rgbTL = SIMD2<Float>(Float(rgbRect.minX / videoWidth), Float(rgbRect.minY / videoHeight))
         let rgbBR = SIMD2<Float>(Float(rgbRect.maxX / videoWidth), Float(rgbRect.maxY / videoHeight))
         let alphaTL = SIMD2<Float>(Float(alphaRect.minX / videoWidth), Float(alphaRect.minY / videoHeight))
@@ -249,11 +249,11 @@ final class VAPRenderer {
         ]
     }
 
-    /// Build a quad using simple alpha-placement split (50/50 left-right or top-bottom).
+    /// 使用简单的 alphaPlacement 分割构建四边形（左右或上下各 50%）。
     func makeFullQuad(viewRect: CGRect, alphaPlacement: VAPAlphaPlacement) -> [VAPSimpleVertex] {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
-        // Split the video frame into RGB half and alpha half based on alpha placement
+        // 根据 alphaPlacement 将视频帧拆分为 RGB 半区和 Alpha 半区。
         let (rgbTL, rgbBR, alphaTL, alphaBR): (SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)
         switch alphaPlacement {
         case .right:
@@ -273,7 +273,7 @@ final class VAPRenderer {
         ]
     }
 
-    // MARK: - Pipeline factory
+    // MARK: - 管线工厂
 
     private static func makePipelines(device: MTLDevice)
         throws -> (MTLRenderPipelineState, MTLRenderPipelineState) {

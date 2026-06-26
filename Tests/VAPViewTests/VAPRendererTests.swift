@@ -8,7 +8,7 @@ import simd
 @Suite("VAPRenderer")
 struct VAPRendererTests {
 
-    // MARK: - A. RGB Size Computation
+    // MARK: - A. RGB 尺寸计算
 
     @Test func rgbSizeAlphaRight() {
         let size = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
@@ -30,7 +30,7 @@ struct VAPRendererTests {
         #expect(size == CGSize(width: 960, height: 540))
     }
 
-    // MARK: - B. Vertex Rect
+    // MARK: - B. 顶点矩形
 
     @Test @MainActor func vertexRectScaleToFill() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
@@ -42,7 +42,7 @@ struct VAPRendererTests {
     @Test @MainActor func vertexRectAspectFitWiderVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         view.renderContentMode = .aspectFit
-        // 16:9 video in square view: should be letterboxed (height < 2)
+        // 16:9 视频显示在正方形视图中：应上下留黑（高度 < 2）。
         let rect = view.vertexRect(videoSize: CGSize(width: 1920, height: 1080))
         #expect(rect.width == 2.0)
         #expect(rect.height < 2.0)
@@ -51,7 +51,7 @@ struct VAPRendererTests {
     @Test @MainActor func vertexRectAspectFitTallerVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         view.renderContentMode = .aspectFit
-        // 9:16 video in square view: should be pillarboxed (width < 2)
+        // 9:16 视频显示在正方形视图中：应左右留黑（宽度 < 2）。
         let rect = view.vertexRect(videoSize: CGSize(width: 1080, height: 1920))
         #expect(rect.width < 2.0)
         #expect(rect.height == 2.0)
@@ -60,7 +60,7 @@ struct VAPRendererTests {
     @Test @MainActor func vertexRectAspectFillWiderVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
         view.renderContentMode = .aspectFill
-        // 16:9 video in square view: width exceeds 2 to fill, height stays 2
+        // 16:9 视频显示在正方形视图中：为填满视图，宽度超过 2，高度保持 2。
         let rect = view.vertexRect(videoSize: CGSize(width: 1920, height: 1080))
         #expect(rect.width > 2.0)
         #expect(abs(rect.height - 2.0) < 0.001)
@@ -72,11 +72,11 @@ struct VAPRendererTests {
         #expect(rect == CGRect(x: -1, y: -1, width: 2, height: 2))
     }
 
-    // MARK: - C. Texture Coordinate Splitting (HWD texCoords)
+    // MARK: - C. 纹理坐标拆分（HWD texCoords）
 
     @Test @MainActor func texCoordsAlphaRight() {
         let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .right)
-        // RGB: left half, Alpha: right half
+        // RGB：左半部分，Alpha：右半部分。
         #expect(rgbTL   == SIMD2<Float>(0, 0))
         #expect(rgbBR   == SIMD2<Float>(0.5, 1))
         #expect(alphaTL == SIMD2<Float>(0.5, 0))
@@ -85,7 +85,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func texCoordsAlphaLeft() {
         let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .left)
-        // RGB: right half, Alpha: left half
+        // RGB：右半部分，Alpha：左半部分。
         #expect(rgbTL   == SIMD2<Float>(0.5, 0))
         #expect(rgbBR   == SIMD2<Float>(1, 1))
         #expect(alphaTL == SIMD2<Float>(0, 0))
@@ -94,7 +94,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func texCoordsAlphaBottom() {
         let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .bottom)
-        // RGB: top half, Alpha: bottom half
+        // RGB：上半部分，Alpha：下半部分。
         #expect(rgbTL   == SIMD2<Float>(0, 0))
         #expect(rgbBR   == SIMD2<Float>(1, 0.5))
         #expect(alphaTL == SIMD2<Float>(0, 0.5))
@@ -103,17 +103,17 @@ struct VAPRendererTests {
 
     @Test @MainActor func texCoordsAlphaTop() {
         let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .top)
-        // RGB: bottom half, Alpha: top half
+        // RGB：下半部分，Alpha：上半部分。
         #expect(rgbTL   == SIMD2<Float>(0, 0.5))
         #expect(rgbBR   == SIMD2<Float>(1, 1))
         #expect(alphaTL == SIMD2<Float>(0, 0))
         #expect(alphaBR == SIMD2<Float>(1, 0.5))
     }
 
-    // MARK: - D. Color Matrix Verification
+    // MARK: - D. 颜色矩阵验证
 
     @Test func bt601FullWhite() {
-        // Y=1.0, Cb=0.5, Cr=0.5 → white (1, 1, 1)
+        // Y=1.0, Cb=0.5, Cr=0.5 -> 白色 (1, 1, 1)。
         let p = VAPColorParameters.bt601Full
         let yuv = SIMD3<Float>(1.0, 0.5, 0.5)
         let rgb = p.colorMatrix * yuv + p.colorOffset
@@ -123,7 +123,7 @@ struct VAPRendererTests {
     }
 
     @Test func bt601FullBlack() {
-        // Y=0.0, Cb=0.5, Cr=0.5 → black (0, 0, 0)
+        // Y=0.0, Cb=0.5, Cr=0.5 -> 黑色 (0, 0, 0)。
         let p = VAPColorParameters.bt601Full
         let yuv = SIMD3<Float>(0.0, 0.5, 0.5)
         let rgb = p.colorMatrix * yuv + p.colorOffset
@@ -151,7 +151,7 @@ struct VAPRendererTests {
     }
 
     @Test func bt601LimitedWhite() {
-        // Y=235/255, Cb=128/255, Cr=128/255 → white
+        // Y=235/255, Cb=128/255, Cr=128/255 -> 白色。
         let p = VAPColorParameters.bt601
         let yuv = SIMD3<Float>(235.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)
         let rgb = p.colorMatrix * yuv + p.colorOffset
@@ -161,7 +161,7 @@ struct VAPRendererTests {
     }
 
     @Test func bt601LimitedBlack() {
-        // Y=16/255, Cb=128/255, Cr=128/255 → black
+        // Y=16/255, Cb=128/255, Cr=128/255 -> 黑色。
         let p = VAPColorParameters.bt601
         let yuv = SIMD3<Float>(16.0 / 255.0, 128.0 / 255.0, 128.0 / 255.0)
         let rgb = p.colorMatrix * yuv + p.colorOffset
@@ -179,7 +179,7 @@ struct VAPRendererTests {
         #expect(abs(rgb.z - 1.0) < 0.05)
     }
 
-    // MARK: - E. Regression: aspectFit must use RGB size, not full video size
+    // MARK: - E. 回归：aspectFit 必须使用 RGB 尺寸，而不是完整视频尺寸
 
     @Test @MainActor func aspectFitUsesRGBSizeNotFullVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
@@ -191,10 +191,10 @@ struct VAPRendererTests {
         let wrongRect = view.vertexRect(videoSize: fullSize)
         let correctRect = view.vertexRect(videoSize: rgbSize)
 
-        // They must differ: fullSize is 16:9, rgbSize is 8:9
+        // 二者必须不同：fullSize 是 16:9，rgbSize 是 8:9。
         #expect(wrongRect != correctRect)
 
-        // rgbSize is 960x1080 (portrait-ish), in square view aspectFit should be narrow
+        // rgbSize 为 960x1080（接近竖屏），在正方形视图中 aspectFit 应该变窄。
         #expect(correctRect.width < 2.0)
         #expect(abs(correctRect.height - 2.0) < 0.001)
     }
@@ -211,12 +211,12 @@ struct VAPRendererTests {
 
         #expect(wrongRect != correctRect)
 
-        // rgbSize is 960x1080 (portrait-ish / taller), in square view aspectFill should overflow height
+        // rgbSize 为 960x1080（接近竖屏且更高），在正方形视图中 aspectFill 应该让高度溢出。
         #expect(abs(correctRect.width - 2.0) < 0.001)
         #expect(correctRect.height > 2.0)
     }
 
-    // MARK: - F. Custom frame regions (rgbFrame/aFrame from vapc)
+    // MARK: - F. 自定义帧区域（vapc 中的 rgbFrame/aFrame）
 
     @Test func vapcCommonInfoDecodesFrameRegions() throws {
         let json = """
@@ -244,8 +244,8 @@ struct VAPRendererTests {
     }
 
     @Test @MainActor func makeFullQuadWithCustomFrameRegions() throws {
-        // Simulate the real MP4: videoW=1136, videoH=1344
-        // rgbFrame=[0,0,750,1334], aFrame=[754,0,375,667]
+        // 模拟真实 MP4：videoW=1136，videoH=1344。
+        // rgbFrame=[0,0,750,1334]，aFrame=[754,0,375,667]。
         let device = MTLCreateSystemDefaultDevice()!
         let renderer = try VAPRenderer(device: device)
 
@@ -262,36 +262,36 @@ struct VAPRendererTests {
                                           videoHeight: videoH)
         #expect(verts.count == 4)
 
-        // Expected normalized RGB coords: (0/1136, 0/1344) to (750/1136, 1334/1344)
+        // 预期归一化 RGB 坐标：(0/1136, 0/1344) 到 (750/1136, 1334/1344)。
         let rgbTLx = Float(0.0 / 1136.0)
         let rgbTLy = Float(0.0 / 1344.0)
         let rgbBRx = Float(750.0 / 1136.0)
         let rgbBRy = Float(1334.0 / 1344.0)
 
-        // Expected normalized alpha coords: (754/1136, 0/1344) to (1129/1136, 667/1344)
+        // 预期归一化 Alpha 坐标：(754/1136, 0/1344) 到 (1129/1136, 667/1344)。
         let aTLx = Float(754.0 / 1136.0)
         let aTLy = Float(0.0 / 1344.0)
         let aBRx = Float(1129.0 / 1136.0)
         let aBRy = Float(667.0 / 1344.0)
 
-        // Vertex 0 (TL): rgb=(rgbTL.x, rgbTL.y), alpha=(aTL.x, aTL.y)
+        // 顶点 0（TL）：rgb=(rgbTL.x, rgbTL.y)，alpha=(aTL.x, aTL.y)。
         #expect(abs(verts[0].texCoord.x - rgbTLx) < 0.001)
         #expect(abs(verts[0].texCoord.y - rgbTLy) < 0.001)
         #expect(abs(verts[0].alphaTexCoord.x - aTLx) < 0.001)
         #expect(abs(verts[0].alphaTexCoord.y - aTLy) < 0.001)
 
-        // Vertex 3 (BR): rgb=(rgbBR.x, rgbBR.y), alpha=(aBR.x, aBR.y)
+        // 顶点 3（BR）：rgb=(rgbBR.x, rgbBR.y)，alpha=(aBR.x, aBR.y)。
         #expect(abs(verts[3].texCoord.x - rgbBRx) < 0.001)
         #expect(abs(verts[3].texCoord.y - rgbBRy) < 0.001)
         #expect(abs(verts[3].alphaTexCoord.x - aBRx) < 0.001)
         #expect(abs(verts[3].alphaTexCoord.y - aBRy) < 0.001)
 
-        // RGB should NOT be a simple 50% split
+        // RGB 不应是简单的 50% 分割。
         #expect(rgbBRx != 0.5, "RGB should not be a simple 50% split for this video")
     }
 
     @Test @MainActor func customFrameRegionsDifferFromAlphaPlacementSplit() throws {
-        // Verify that the custom frame region gives different results than the old alpha placement split
+        // 验证自定义帧区域与旧的 alpha placement 分割会得到不同结果。
         let device = MTLCreateSystemDefaultDevice()!
         let renderer = try VAPRenderer(device: device)
         let viewRect = CGRect(x: -1, y: -1, width: 2, height: 2)
@@ -302,8 +302,8 @@ struct VAPRendererTests {
                                                 alphaRect: CGRect(x: 754, y: 0, width: 375, height: 667),
                                                 videoWidth: 1136, videoHeight: 1344)
 
-        // They must differ — the old split assumes 50/50 which is wrong for this video
-        // Compare BR vertex (index 3) which has the max UV coords
+        // 二者必须不同；旧分割假设 50/50，对于这个视频并不正确。
+        // 比较具有最大 UV 坐标的 BR 顶点（索引 3）。
         #expect(alphaPlacementVerts[3].texCoord != customVerts[3].texCoord)
         #expect(alphaPlacementVerts[3].alphaTexCoord != customVerts[3].alphaTexCoord)
     }
@@ -318,7 +318,7 @@ struct VAPRendererTests {
         let rectFull = view.vertexRect(videoSize: fullSize)
         let rectRGB = view.vertexRect(videoSize: rgbSize)
 
-        // scaleToFill always returns the same rect regardless of video size
+        // 无论视频尺寸如何，scaleToFill 都返回同一个矩形。
         #expect(rectFull == rectRGB)
         #expect(rectFull == CGRect(x: -1, y: -1, width: 2, height: 2))
     }

@@ -5,7 +5,7 @@
 #include <metal_stdlib>
 using namespace metal;
 
-// MARK: - Shared structs
+// MARK: - 共享结构体
 
 struct ColorParameters {
     float3x3 colorMatrix;
@@ -36,7 +36,7 @@ struct VAPAttachmentRasterizerData {
     float2 maskCoord;
 };
 
-// MARK: - HWD path: alpha-split YUV video
+// MARK: - HWD 路径：alpha 分割 YUV 视频
 
 vertex VAPHWDRasterizerData
 hwd_vertexShader(uint vertexID [[vertex_id]],
@@ -64,14 +64,14 @@ hwd_yuvFragmentShader(VAPHWDRasterizerData   in        [[stage_in]],
     float3 rgb = params.colorMatrix * yuv + params.colorOffset;
     rgb = clamp(rgb, 0.0, 1.0);
 
-    // Alpha is extracted from the Y channel of the alpha-side region
+    // Alpha 从透明度区域的 Y 通道提取。
     float alpha = yTexture.sample(texSampler, in.alphaTexCoord).r;
     alpha = clamp(alpha, 0.0, 1.0);
 
     return float4(rgb * alpha, alpha);
 }
 
-// MARK: - VAP path: YUV base video (alpha split from same video frame)
+// MARK: - VAP 路径：YUV 基础视频（alpha 来自同一视频帧的分割区域）
 
 struct VAPSimpleVertex {
     float4 position      [[attribute(0)]];
@@ -111,14 +111,14 @@ vap_yuvFragmentShader(VAPSimpleRasterizerData  in        [[stage_in]],
     float3 rgb = params.colorMatrix * yuv + params.colorOffset;
     rgb = clamp(rgb, 0.0, 1.0);
 
-    // Alpha is extracted from the Y channel of the alpha-side region of the same video frame
+    // Alpha 从同一视频帧透明度区域的 Y 通道提取。
     float alpha = yTexture.sample(texSampler, in.alphaTexCoord).r;
     alpha = clamp(alpha, 0.0, 1.0);
 
     return float4(rgb * alpha, alpha);
 }
 
-// MARK: - VAP attachment path
+// MARK: - VAP 挂件路径
 
 vertex VAPAttachmentRasterizerData
 vapAttachment_VertexShader(uint vertexID [[vertex_id]],

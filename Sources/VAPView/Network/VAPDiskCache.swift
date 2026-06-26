@@ -7,11 +7,11 @@ import CryptoKit
 
 private typealias VAPResourceProgressHandler = @MainActor @Sendable (Double) -> Void
 
-/// Default `VAPResourceLoader` implementation.
+/// 默认的 `VAPResourceLoader` 实现。
 ///
-/// - Cache directory: `<Caches>/com.vap/resources/`
-/// - Cache key: SHA-256 hex of the URL string + original file extension
-/// - Concurrent requests for the same URL share a single download.
+/// - 缓存目录：`<Caches>/com.vap/resources/`
+/// - 缓存 key：URL 字符串的 SHA-256 十六进制值 + 原始文件扩展名
+/// - 同一个 URL 的并发请求会共享同一次下载。
 public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
 
     public static let shared = VAPDiskCache()
@@ -68,7 +68,7 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
         }
     }
 
-    // MARK: - Private
+    // MARK: - 私有方法
 
     private func cacheFileName(for urlString: String, pathExtension: String) -> String {
         let hash = SHA256.hash(data: Data(urlString.utf8))
@@ -96,7 +96,7 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
     }
 }
 
-// MARK: - Inflight coalescing actor
+// MARK: - 进行中请求合并 actor
 
 private actor InflightActor {
     private struct Entry {
@@ -107,10 +107,9 @@ private actor InflightActor {
 
     private var entries: [String: Entry] = [:]
 
-    /// Returns an existing in-flight task for the specified key, or creates one.
+    /// 返回指定 key 对应的进行中任务；不存在时创建新任务。
     ///
-    /// The owner of a newly created task is responsible for removing the entry when
-    /// the task completes.
+    /// 新建任务的拥有者需要在任务完成后移除条目。
     func getOrCreate(for key: String,
                      progressHandler: @escaping VAPResourceProgressHandler,
                      make: (@escaping VAPResourceProgressHandler) -> Task<String, Error>) -> (Task<String, Error>, Bool) {
@@ -147,7 +146,7 @@ private actor InflightActor {
     }
 }
 
-// MARK: - Session-level download manager (iOS 13+ compatible)
+// MARK: - 会话级下载管理器（兼容 iOS 13+）
 
 private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDelegate, @unchecked Sendable {
 
@@ -186,7 +185,7 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession,
                     downloadTask: URLSessionDownloadTask,
                     didFinishDownloadingTo location: URL) {
-        // [M1] 先移除 handler 再 resume，防止 didCompleteWithError 对同一 continuation 二次 resume
+        // [M1] 先移除处理器再 resume，防止 didCompleteWithError 对同一 continuation 二次 resume
         lock.lock()
         let handler = handlers.removeValue(forKey: downloadTask.taskIdentifier)
         lock.unlock()
@@ -222,9 +221,9 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
     func urlSession(_ session: URLSession,
                     task: URLSessionTask,
                     didCompleteWithError error: Error?) {
-        // [BUG-D4] 无论成功与否均摘除 handler，保持与 didFinishDownloadingTo 路径一致。
+        // [BUG-D4] 无论成功与否均摘除处理器，保持与 didFinishDownloadingTo 路径一致。
         // 成功完成时 didFinishDownloadingTo 已通过 resume(returning:) 结束 continuation，
-        // 此处 handler 为 nil，removeValue 是空操作，无副作用。
+        // 此处处理器为 nil，removeValue 是空操作，无副作用。
         lock.lock()
         let handler = handlers.removeValue(forKey: task.taskIdentifier)
         lock.unlock()

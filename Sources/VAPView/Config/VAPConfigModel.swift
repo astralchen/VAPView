@@ -50,7 +50,7 @@ extension VAPConfigAttachmentFitType {
     }
 }
 
-// MARK: - Top-level VAP config (decoded from vapc JSON)
+// MARK: - 顶层 VAP 配置（从 vapc JSON 解码）
 
 public struct VAPConfig: Decodable, Sendable {
     public let info: VAPCommonInfo
@@ -65,24 +65,24 @@ public struct VAPCommonInfo: Decodable, Sendable {
     public let videoW: Int
     public let videoH: Int
     public let orien: Int
-    public let v: Int?  // vapc version field (JSON key "v")
-    /// RGB content region within the video frame: [x, y, w, h] in pixels.
+    public let v: Int?  // vapc 版本字段（JSON key "v"）
+    /// 视频帧内的 RGB 内容区域：[x, y, w, h]，单位为像素。
     public let rgbFrame: [CGFloat]?
-    /// Alpha content region within the video frame: [x, y, w, h] in pixels.
-    /// May be half-resolution compared to rgbFrame (space optimization).
+    /// 视频帧内的 Alpha 内容区域：[x, y, w, h]，单位为像素。
+    /// 出于空间优化考虑，可能是 rgbFrame 的半分辨率。
     public let aFrame: [CGFloat]?
 
     var orientation: VAPConfigOrientation { VAPConfigOrientation(rawValue: orien) ?? .none }
     var version: Int { v ?? 0 }
 
-    /// Returns the RGB rect within the video, or nil if rgbFrame is absent/invalid.
+    /// 返回视频内的 RGB 区域；rgbFrame 缺失或无效时返回 nil。
     var rgbRect: CGRect? {
         guard let f = rgbFrame, f.count == 4,
               f[2] > 0, f[3] > 0, f[0] >= 0, f[1] >= 0 else { return nil }
         return CGRect(x: f[0], y: f[1], width: f[2], height: f[3])
     }
 
-    /// Returns the alpha rect within the video, or nil if aFrame is absent/invalid.
+    /// 返回视频内的 Alpha 区域；aFrame 缺失或无效时返回 nil。
     var alphaRect: CGRect? {
         guard let f = aFrame, f.count == 4,
               f[2] > 0, f[3] > 0, f[0] >= 0, f[1] >= 0 else { return nil }

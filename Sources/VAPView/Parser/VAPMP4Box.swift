@@ -4,7 +4,7 @@
 
 import Foundation
 
-// MARK: - Sample
+// MARK: - 采样
 
 struct VAPMP4Sample: Sendable {
     let index: Int
@@ -16,7 +16,7 @@ struct VAPMP4Sample: Sendable {
     let isKeySample: Bool
 }
 
-// MARK: - Codec parameter structs
+// MARK: - 编码参数结构体
 
 struct VAPAvcCData: Sendable {
     var sps: [Data] = []
@@ -30,7 +30,7 @@ struct VAPHvcCData: Sendable {
     var pps: Data?
 }
 
-// MARK: - Box payload
+// MARK: - Box 载荷
 
 enum VAPMP4Payload: Sendable {
     case container
@@ -47,7 +47,7 @@ enum VAPMP4Payload: Sendable {
     case avcC(VAPAvcCData)
     case hvcC(VAPHvcCData)
     case vapc(jsonData: Data)
-    case visualEntry(width: Int, height: Int)  // avc1/hvc1 VisualSampleEntry dimensions
+    case visualEntry(width: Int, height: Int)  // avc1/hvc1 VisualSampleEntry 尺寸
     case audio
     case unknown
 
@@ -55,7 +55,7 @@ enum VAPMP4Payload: Sendable {
     struct CttsEntry: Sendable { var count: UInt32; var offset: Int32 }
     struct StscEntry: Sendable { var firstChunk: UInt32; var samplesPerChunk: UInt32; var descIndex: UInt32 }
 }
-// MARK: - Box node
+// MARK: - Box 节点
 
 struct VAPMP4Box: Sendable {
     let type: String
