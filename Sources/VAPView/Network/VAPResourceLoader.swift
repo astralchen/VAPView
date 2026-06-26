@@ -19,8 +19,8 @@ public protocol VAPResourceLoader: AnyObject, Sendable {
     ///   - onProgress: Called on the main actor with download progress in `[0, 1]`.
     ///                 Only invoked for remote URLs that are not yet cached.
     /// - Returns: An absolute local file path ready for playback.
-    func localPath(for filePath: String,
-                   onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+    @concurrent func localPath(for filePath: String,
+                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
 
     /// Removes all files from the local cache managed by this loader.
     func clearCache() throws

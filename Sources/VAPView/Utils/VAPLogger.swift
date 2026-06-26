@@ -11,7 +11,7 @@ struct VAPLogger: Sendable {
 
     init(module: VAPLogModule) {
         self.module = module
-        logger = Logger(subsystem: "com.tencent.vap", category: module.rawValue)
+        logger = Logger(subsystem: "com.vap", category: module.rawValue)
     }
 
     func info(_ message: @autoclosure () -> String,

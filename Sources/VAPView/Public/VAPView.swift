@@ -90,6 +90,28 @@ public final class VAPView: UIView {
 
     // MARK: - Public API
 
+    /// Asynchronously downloads and caches a VAP resource.
+    ///
+    /// Use this method to warm the disk cache before creating a view. Concurrent
+    /// requests for the same URL through the same `VAPDiskCache` instance share a
+    /// single download, and each caller receives progress updates.
+    ///
+    /// - Parameters:
+    ///   - filePath: The local file path or HTTPS URL of the resource. Local paths
+    ///     are returned unchanged.
+    ///   - resourceLoader: The object that resolves the resource. The default value
+    ///     is `VAPDiskCache.shared`.
+    ///   - onProgress: A closure the loader calls with progress values in the range
+    ///     `0...1`.
+    /// - Returns: A local file path suitable for playback.
+    @discardableResult
+    @concurrent public nonisolated static func prefetch(filePath: String,
+                                                        resourceLoader: VAPResourceLoader = VAPDiskCache.shared,
+                                                        onProgress: (@MainActor @Sendable (Double) -> Void)? = nil) async throws -> String {
+        let progressHandler: @MainActor @Sendable (Double) -> Void = onProgress ?? { _ in }
+        return try await resourceLoader.localPath(for: filePath, onProgress: progressHandler)
+    }
+
     /// Play a VAP/HWD animation file.
     ///
     /// The renderer automatically selects the appropriate pipeline based on the MP4 content:

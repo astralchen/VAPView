@@ -128,6 +128,7 @@ Each video frame is split spatially into two halves — one carries RGB content,
 
 | Property / Method | Description |
 |---|---|
+| `VAPView.prefetch(filePath:resourceLoader:onProgress:)` | Download/cache a resource before any view exists |
 | `play(config:onEvent:)` | Start playback |
 | `stop()` | Stop and release resources |
 | `pause()` | Pause playback |
@@ -187,12 +188,22 @@ Set `level: .off` to disable SDK logs. Messages are sanitized by default; pass `
 
 ## Custom Resource Loader
 
-The default `VAPDiskCache` downloads remote files to `<Caches>/com.tencent.vap/resources/`, keyed by SHA-256 of the URL. Replace it with your own `VAPResourceLoader` implementation:
+The default `VAPDiskCache` downloads remote files to `<Caches>/com.vap/resources/`, keyed by SHA-256 of the URL. Replace it with your own `VAPResourceLoader` implementation:
+
+You can also warm the cache before creating a view:
 
 ```swift
-public protocol VAPResourceLoader: Sendable {
-    func localPath(for filePath: String,
-                   onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+try await VAPView.prefetch(filePath: "https://example.com/gift.mp4") { progress in
+    print("prefetch:", progress)
+}
+```
+
+Concurrent requests for the same URL through the same `VAPDiskCache` instance share one network request. For example, if `VAPView.prefetch(...)` and `vapView.play(...)` are started with the same URL at the same time, playback waits for the shared download instead of starting another request, and both callers receive progress callbacks.
+
+```swift
+public protocol VAPResourceLoader: AnyObject, Sendable {
+    @concurrent func localPath(for filePath: String,
+                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
 }
 
 // Assign before calling play:

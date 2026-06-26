@@ -5,11 +5,13 @@
 import Foundation
 import CryptoKit
 
+private typealias VAPResourceProgressHandler = @MainActor @Sendable (Double) -> Void
+
 /// Default `VAPResourceLoader` implementation.
 ///
-/// - Cache directory: `<Caches>/com.tencent.vap/resources/`
+/// - Cache directory: `<Caches>/com.vap/resources/`
 /// - Cache key: SHA-256 hex of the URL string + original file extension
-/// - Concurrent requests for the same URL are coalesced into a single download
+/// - Concurrent requests for the same URL share a single download.
 public final class VAPDiskCache: VAPResourceLoader {
 
     public static let shared = VAPDiskCache()
@@ -24,7 +26,7 @@ public final class VAPDiskCache: VAPResourceLoader {
 
     init(configuration: URLSessionConfiguration) {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        self.cacheDir = caches.appendingPathComponent("com.tencent.vap/resources", isDirectory: true)
+        self.cacheDir = caches.appendingPathComponent("com.vap/resources", isDirectory: true)
         try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
         self.sessionManager = VAPDownloadSessionManager(configuration: configuration)
     }
@@ -37,8 +39,8 @@ public final class VAPDiskCache: VAPResourceLoader {
 
     // MARK: - VAPResourceLoader
 
-    public func localPath(for filePath: String,
-                          onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
+    @concurrent public func localPath(for filePath: String,
+                                      onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
         guard filePath.hasPrefix("http://") || filePath.hasPrefix("https://") else {
             return filePath
         }
@@ -72,17 +74,17 @@ public final class VAPDiskCache: VAPResourceLoader {
         return ext.isEmpty ? hash : hash + "." + ext
     }
 
-    private func download(url: URL,
-                          dest: URL,
-                          onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
+    @concurrent private func download(url: URL,
+                                      dest: URL,
+                                      onProgress: @escaping VAPResourceProgressHandler) async throws -> String {
         let mgr = sessionManager
-        // [BUG-D2/D3] 原子 getOrCreate：检查与注册在同一 actor 调用内完成，消除 TOCTOU 竞争；
-        // isOwner 标记由创建方负责清理，避免 defer+非结构化 Task 导致的误删新任务。
-        let (task, isOwner) = await inflightActor.getOrCreate(for: dest.path) {
-            Task { try await mgr.download(url: url, dest: dest, onProgress: onProgress) }
+        let (task, isOwner) = await inflightActor.getOrCreate(for: dest.path,
+                                                              onProgress: onProgress) { progressRelay in
+            Task { try await mgr.download(url: url, dest: dest, onProgress: progressRelay) }
         }
         do {
             let result = try await task.value
+            await onProgress(1.0)
             if isOwner { await inflightActor.remove(for: dest.path) }
             return result
         } catch {
@@ -95,22 +97,52 @@ public final class VAPDiskCache: VAPResourceLoader {
 // MARK: - Inflight coalescing actor
 
 private actor InflightActor {
-    private var tasks: [String: Task<String, Error>] = [:]
+    private struct Entry {
+        let task: Task<String, Error>
+        var progressHandlers: [UUID: VAPResourceProgressHandler]
+        var latestProgress: Double?
+    }
 
-    /// 原子 getOrCreate：若已有 inflight 任务则返回 (existing, isOwner=false)；
-    /// 否则调用 make() 创建新任务，注册后返回 (new, isOwner=true)。
-    /// isOwner == true 的调用方负责在任务结束后调用 remove(for:)。
+    private var entries: [String: Entry] = [:]
+
+    /// Returns an existing in-flight task for the specified key, or creates one.
+    ///
+    /// The owner of a newly created task is responsible for removing the entry when
+    /// the task completes.
     func getOrCreate(for key: String,
-                     make: () -> Task<String, Error>) -> (Task<String, Error>, Bool) {
-        if let existing = tasks[key] {
-            return (existing, false)
+                     onProgress: @escaping VAPResourceProgressHandler,
+                     make: (@escaping VAPResourceProgressHandler) -> Task<String, Error>) -> (Task<String, Error>, Bool) {
+        let subscriberID = UUID()
+        if var existing = entries[key] {
+            existing.progressHandlers[subscriberID] = onProgress
+            if let latestProgress = existing.latestProgress {
+                Task { await onProgress(latestProgress) }
+            }
+            entries[key] = existing
+            return (existing.task, false)
         }
-        let task = make()
-        tasks[key] = task
+        let relay: VAPResourceProgressHandler = { progress in
+            Task { await self.emitProgress(progress, for: key) }
+        }
+        let task = make(relay)
+        entries[key] = Entry(task: task,
+                             progressHandlers: [subscriberID: onProgress],
+                             latestProgress: nil)
         return (task, true)
     }
 
-    func remove(for key: String) { tasks.removeValue(forKey: key) }
+    func remove(for key: String) { entries.removeValue(forKey: key) }
+
+    private func emitProgress(_ progress: Double, for key: String) async {
+        guard var entry = entries[key] else { return }
+        entry.latestProgress = progress
+        let handlers = Array(entry.progressHandlers.values)
+        entries[key] = entry
+
+        for handler in handlers {
+            await handler(progress)
+        }
+    }
 }
 
 // MARK: - Session-level download manager (iOS 13+ compatible)
@@ -129,13 +161,13 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
 
     struct DownloadHandler {
         let dest: URL
-        let onProgress: @MainActor @Sendable (Double) -> Void
+        let onProgress: VAPResourceProgressHandler
         let continuation: CheckedContinuation<String, Error>
     }
 
-    func download(url: URL,
-                  dest: URL,
-                  onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
+    @concurrent func download(url: URL,
+                              dest: URL,
+                              onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
         try await withCheckedThrowingContinuation { cont in
             let task = session.downloadTask(with: url)
             lock.lock()

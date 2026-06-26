@@ -33,11 +33,94 @@ final class VAPMockURLProtocol: URLProtocol, @unchecked Sendable {
     override func stopLoading() {}
 }
 
+private final class VAPDelayedURLProtocolState: @unchecked Sendable {
+    private let finish = DispatchSemaphore(value: 0)
+    private let lock = NSLock()
+    private var _requestCount = 0
+    private var didStart = false
+    private var startedContinuation: CheckedContinuation<Void, Never>?
+
+    var requestCount: Int {
+        lock.lock()
+        defer { lock.unlock() }
+        return _requestCount
+    }
+
+    func recordRequest() {
+        let continuation: CheckedContinuation<Void, Never>?
+        lock.lock()
+        _requestCount += 1
+        didStart = true
+        continuation = startedContinuation
+        startedContinuation = nil
+        lock.unlock()
+        continuation?.resume()
+    }
+
+    func waitUntilStarted() async {
+        await withCheckedContinuation { continuation in
+            registerStartedWaiter(continuation)
+        }
+    }
+
+    func waitUntilReleased() {
+        finish.wait()
+    }
+
+    func releaseResponse() {
+        finish.signal()
+    }
+
+    private func registerStartedWaiter(_ continuation: CheckedContinuation<Void, Never>) {
+        lock.lock()
+        if didStart {
+            lock.unlock()
+            continuation.resume()
+        } else {
+            startedContinuation = continuation
+            lock.unlock()
+        }
+    }
+}
+
+nonisolated(unsafe) private var delayedState = VAPDelayedURLProtocolState()
+
+final class VAPDelayedURLProtocol: URLProtocol, @unchecked Sendable {
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        delayedState.recordRequest()
+
+        let response = HTTPURLResponse(
+            url: request.url!,
+            statusCode: 200,
+            httpVersion: nil,
+            headerFields: ["Content-Length": "4"]
+        )!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data("ab".utf8))
+
+        delayedState.waitUntilReleased()
+
+        client?.urlProtocol(self, didLoad: Data("cd".utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
 // MARK: - Helper
 
 private func makeMockCache(tmpDir: URL) -> VAPDiskCache {
     let config = URLSessionConfiguration.ephemeral
     config.protocolClasses = [VAPMockURLProtocol.self]
+    return VAPDiskCache(configuration: config, cacheDirectory: tmpDir)
+}
+
+private func makeDelayedCache(tmpDir: URL) -> VAPDiskCache {
+    let config = URLSessionConfiguration.ephemeral
+    config.protocolClasses = [VAPDelayedURLProtocol.self]
     return VAPDiskCache(configuration: config, cacheDirectory: tmpDir)
 }
 
@@ -134,6 +217,41 @@ struct VAPDiskCacheTests {
         #expect(first == second)
         let content = try Data(contentsOf: URL(fileURLWithPath: first))
         #expect(content == Data("cached content".utf8))
+    }
+
+    @Test @MainActor func concurrentRequestsShareDownloadAndProgressCallbacks() async throws {
+        delayedState = VAPDelayedURLProtocolState()
+        let dir = tmpCacheDir()
+        let cache = makeDelayedCache(tmpDir: dir)
+        let url = "https://example.com/shared.mp4"
+        var firstProgress: [Double] = []
+        var secondProgress: [Double] = []
+
+        let first = Task {
+            try await cache.localPath(for: url) { progress in
+                firstProgress.append(progress)
+            }
+        }
+
+        await delayedState.waitUntilStarted()
+
+        let second = Task {
+            try await cache.localPath(for: url) { progress in
+                secondProgress.append(progress)
+            }
+        }
+
+        try await Task.sleep(nanoseconds: 100_000_000)
+        delayedState.releaseResponse()
+
+        let firstPath = try await first.value
+        let secondPath = try await second.value
+        try await Task.sleep(nanoseconds: 100_000_000)
+
+        #expect(firstPath == secondPath)
+        #expect(delayedState.requestCount == 1)
+        #expect(firstProgress.last == 1.0)
+        #expect(secondProgress.last == 1.0)
     }
 
     // MARK: Progress callback

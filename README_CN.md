@@ -128,6 +128,7 @@ vapView.play(config: config, onEvent: nil)
 
 | 属性 / 方法 | 说明 |
 |---|---|
+| `VAPView.prefetch(filePath:resourceLoader:onProgress:)` | 在没有视图实例时预下载/缓存资源 |
 | `play(config:onEvent:)` | 开始播放 |
 | `stop()` | 停止并释放资源 |
 | `pause()` | 暂停播放 |
@@ -187,12 +188,22 @@ VAPLogging.configure(
 
 ## 自定义资源加载器
 
-默认的 `VAPDiskCache` 以 URL 的 SHA-256 为文件名，将下载文件缓存至 `<Caches>/com.tencent.vap/resources/`。可替换为自定义的 `VAPResourceLoader` 实现：
+默认的 `VAPDiskCache` 以 URL 的 SHA-256 为文件名，将下载文件缓存至 `<Caches>/com.vap/resources/`。可替换为自定义的 `VAPResourceLoader` 实现：
+
+也可以在创建视图前预热缓存：
 
 ```swift
-public protocol VAPResourceLoader: Sendable {
-    func localPath(for filePath: String,
-                   onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+try await VAPView.prefetch(filePath: "https://example.com/gift.mp4") { progress in
+    print("prefetch:", progress)
+}
+```
+
+通过同一个 `VAPDiskCache` 实例请求同一个 URL 时，并发请求会共用一次网络下载。例如 `VAPView.prefetch(...)` 和 `vapView.play(...)` 同时加载同一个 URL，播放会等待共享下载完成，不会再发起第二个请求，并且两个调用方都会收到进度回调。
+
+```swift
+public protocol VAPResourceLoader: AnyObject, Sendable {
+    @concurrent func localPath(for filePath: String,
+                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
 }
 
 // 在调用 play 前赋值：
