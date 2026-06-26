@@ -11,22 +11,22 @@ struct VAPRendererTests {
     // MARK: - A. RGB Size Computation
 
     @Test func rgbSizeAlphaRight() {
-        let size = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let size = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 1080))
     }
 
     @Test func rgbSizeAlphaLeft() {
-        let size = vapRGBSize(blendMode: .alphaLeft, videoWidth: 1920, videoHeight: 1080)
+        let size = rgbContentSize(alphaPlacement: .left, videoWidth: 1920, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 1080))
     }
 
     @Test func rgbSizeAlphaBottom() {
-        let size = vapRGBSize(blendMode: .alphaBottom, videoWidth: 960, videoHeight: 1080)
+        let size = rgbContentSize(alphaPlacement: .bottom, videoWidth: 960, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 540))
     }
 
     @Test func rgbSizeAlphaTop() {
-        let size = vapRGBSize(blendMode: .alphaTop, videoWidth: 960, videoHeight: 1080)
+        let size = rgbContentSize(alphaPlacement: .top, videoWidth: 960, videoHeight: 1080)
         #expect(size == CGSize(width: 960, height: 540))
     }
 
@@ -75,7 +75,7 @@ struct VAPRendererTests {
     // MARK: - C. Texture Coordinate Splitting (HWD texCoords)
 
     @Test @MainActor func texCoordsAlphaRight() {
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(blendMode: .alphaRight)
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .right)
         // RGB: left half, Alpha: right half
         #expect(rgbTL   == SIMD2<Float>(0, 0))
         #expect(rgbBR   == SIMD2<Float>(0.5, 1))
@@ -84,7 +84,7 @@ struct VAPRendererTests {
     }
 
     @Test @MainActor func texCoordsAlphaLeft() {
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(blendMode: .alphaLeft)
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .left)
         // RGB: right half, Alpha: left half
         #expect(rgbTL   == SIMD2<Float>(0.5, 0))
         #expect(rgbBR   == SIMD2<Float>(1, 1))
@@ -93,7 +93,7 @@ struct VAPRendererTests {
     }
 
     @Test @MainActor func texCoordsAlphaBottom() {
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(blendMode: .alphaBottom)
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .bottom)
         // RGB: top half, Alpha: bottom half
         #expect(rgbTL   == SIMD2<Float>(0, 0))
         #expect(rgbBR   == SIMD2<Float>(1, 0.5))
@@ -102,7 +102,7 @@ struct VAPRendererTests {
     }
 
     @Test @MainActor func texCoordsAlphaTop() {
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(blendMode: .alphaTop)
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = VAPHWDRenderer.texCoords(alphaPlacement: .top)
         // RGB: bottom half, Alpha: top half
         #expect(rgbTL   == SIMD2<Float>(0, 0.5))
         #expect(rgbBR   == SIMD2<Float>(1, 1))
@@ -186,7 +186,7 @@ struct VAPRendererTests {
         view.vapContentMode = .aspectFit
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
 
         let wrongRect = view.vertexRect(videoSize: fullSize)
         let correctRect = view.vertexRect(videoSize: rgbSize)
@@ -204,7 +204,7 @@ struct VAPRendererTests {
         view.vapContentMode = .aspectFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
 
         let wrongRect = view.vertexRect(videoSize: fullSize)
         let correctRect = view.vertexRect(videoSize: rgbSize)
@@ -290,13 +290,13 @@ struct VAPRendererTests {
         #expect(rgbBRx != 0.5, "RGB should not be a simple 50% split for this video")
     }
 
-    @Test @MainActor func customFrameRegionsDifferFromBlendModeSplit() throws {
-        // Verify that the custom frame region gives different results than the old blend mode split
+    @Test @MainActor func customFrameRegionsDifferFromAlphaPlacementSplit() throws {
+        // Verify that the custom frame region gives different results than the old alpha placement split
         let device = MTLCreateSystemDefaultDevice()!
         let renderer = try VAPRenderer(device: device)
         let viewRect = CGRect(x: -1, y: -1, width: 2, height: 2)
 
-        let blendModeVerts = renderer.makeFullQuad(viewRect: viewRect, blendMode: .alphaRight)
+        let alphaPlacementVerts = renderer.makeFullQuad(viewRect: viewRect, alphaPlacement: .right)
         let customVerts = renderer.makeFullQuad(viewRect: viewRect,
                                                 rgbRect: CGRect(x: 0, y: 0, width: 750, height: 1334),
                                                 alphaRect: CGRect(x: 754, y: 0, width: 375, height: 667),
@@ -304,8 +304,8 @@ struct VAPRendererTests {
 
         // They must differ — the old split assumes 50/50 which is wrong for this video
         // Compare BR vertex (index 3) which has the max UV coords
-        #expect(blendModeVerts[3].texCoord != customVerts[3].texCoord)
-        #expect(blendModeVerts[3].alphaTexCoord != customVerts[3].alphaTexCoord)
+        #expect(alphaPlacementVerts[3].texCoord != customVerts[3].texCoord)
+        #expect(alphaPlacementVerts[3].alphaTexCoord != customVerts[3].alphaTexCoord)
     }
 
     @Test @MainActor func scaleToFillUnaffectedByBug() {
@@ -313,7 +313,7 @@ struct VAPRendererTests {
         view.vapContentMode = .scaleToFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
-        let rgbSize = vapRGBSize(blendMode: .alphaRight, videoWidth: 1920, videoHeight: 1080)
+        let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
 
         let rectFull = view.vertexRect(videoSize: fullSize)
         let rectRGB = view.vertexRect(videoSize: rgbSize)

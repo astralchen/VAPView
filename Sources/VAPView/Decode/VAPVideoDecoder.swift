@@ -37,19 +37,19 @@ actor VAPVideoDecoder {
             guard let avcC = info.avcC,
                   let sps = avcC.sps.first,
                   let pps = avcC.pps.first else {
-                throw VAPError.failedToCreateVTBDesc
+                throw VAPError.videoToolboxDescriptionCreationFailed
             }
             formatDesc = try makeH264FormatDesc(sps: sps, pps: pps)
         case .h265:
             guard let hvcC = info.hvcC else {
-                throw VAPError.failedToCreateVTBDesc
+                throw VAPError.videoToolboxDescriptionCreationFailed
             }
             formatDesc = try makeH265FormatDesc(hvcC: hvcC)
         }
     }
 
     private func setupDecompressionSession() throws {
-        guard let formatDesc else { throw VAPError.failedToCreateVTBSession }
+        guard let formatDesc else { throw VAPError.videoToolboxSessionCreationFailed }
         var decoderSpec: [CFString: Any] = [:]
         if #available(iOS 17.0, *) {
             decoderSpec[kVTVideoDecoderSpecification_EnableHardwareAcceleratedVideoDecoder] = true
@@ -68,7 +68,7 @@ actor VAPVideoDecoder {
             decompressionSessionOut: &session
         )
         guard status == noErr, let session else {
-            throw VAPError.failedToCreateVTBSession
+            throw VAPError.videoToolboxSessionCreationFailed
         }
         self.session = session
     }
@@ -84,7 +84,7 @@ actor VAPVideoDecoder {
             throw VAPError.decodeFailed(NSError(domain: "VAPDecoder", code: -1,
                 userInfo: [NSLocalizedDescriptionKey: "readSampleData returned nil for index=\(index) offset=\(sample.offset) size=\(sample.size)"]))
         }
-        guard let formatDesc, let session else { throw VAPError.failedToCreateVTBSession }
+        guard let formatDesc, let session else { throw VAPError.videoToolboxSessionCreationFailed }
 
         let isKey = sample.isKeySample
         var timingInfo = CMSampleTimingInfo(
@@ -284,13 +284,13 @@ actor VAPVideoDecoder {
                 )
             }
         }
-        guard status == noErr, let desc else { throw VAPError.failedToCreateVTBDesc }
+        guard status == noErr, let desc else { throw VAPError.videoToolboxDescriptionCreationFailed }
         return desc
     }
 
     private func makeH265FormatDesc(hvcC: VAPHvcCData) throws -> CMVideoFormatDescription {
         guard let vps = hvcC.vps, let sps = hvcC.sps, let pps = hvcC.pps else {
-            throw VAPError.failedToCreateVTBDesc
+            throw VAPError.videoToolboxDescriptionCreationFailed
         }
         var desc: CMVideoFormatDescription?
         let status: OSStatus = vps.withUnsafeBytes { vpsPtr in
@@ -318,7 +318,7 @@ actor VAPVideoDecoder {
                 }
             }
         }
-        guard status == noErr, let desc else { throw VAPError.failedToCreateVTBDesc }
+        guard status == noErr, let desc else { throw VAPError.videoToolboxDescriptionCreationFailed }
         return desc
     }
 }

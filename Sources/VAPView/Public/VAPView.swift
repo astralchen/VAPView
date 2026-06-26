@@ -116,8 +116,8 @@ public final class VAPView: UIView {
     ///
     /// The renderer automatically selects the appropriate pipeline based on the MP4 content:
     /// - **VAP path**: If the MP4 contains a `vapc` box, the renderer reads `rgbFrame`/`aFrame`
-    ///   from it to determine exact RGB and alpha regions. In this case `config.blendMode` is ignored.
-    /// - **HWD path**: If no `vapc` box is present, the renderer uses `config.blendMode` to
+    ///   from it to determine exact RGB and alpha regions. In this case `config.alphaPlacement` is ignored.
+    /// - **HWD path**: If no `vapc` box is present, the renderer uses `config.alphaPlacement` to
     ///   determine the alpha channel position (left/right/top/bottom 50% split).
     ///
     /// ## VAPPlayConfig properties
@@ -125,11 +125,11 @@ public final class VAPView: UIView {
     /// | Property | Description |
     /// |---|---|
     /// | `filePath` | Local file path or `http(s)://` URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. |
-    /// | `blendMode` | Alpha channel position (`.alphaLeft`/`.alphaRight`/`.alphaTop`/`.alphaBottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.alphaRight`. |
-    /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.doNothing`. |
+    /// | `alphaPlacement` | Alpha channel position (`.left`/`.right`/`.top`/`.bottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.right`. |
+    /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.ignore`. |
     /// | `contentMode` | Display scaling: `.scaleToFill` (default), `.aspectFit`, or `.aspectFill`. |
-    /// | `attachmentSources` | Maps `srcId` → ``VAPAttachmentSource`` (`.image`, `.url`, `.text`) for VAP attachment slots defined in the `vapc` config. |
-    /// | `imageLoader` | Custom async image loader for `.url` type attachments. Required when using `.url` attachment sources. |
+    /// | `attachmentSources` | Maps `srcId` -> ``VAPAttachmentSource`` (`.image`, `.imageURL`, `.text`) for VAP attachment slots defined in the `vapc` config. |
+    /// | `imageLoader` | Custom async image loader for `.imageURL` type attachments. Required when using `.imageURL` attachment sources. |
     /// | `bufferCount` | Decoded frame buffer depth. Default: 3. |
     /// | `fps` | Override playback FPS. 0 (default) = use the value from MP4 header. |
     /// | `playAudio` | Whether to play the audio track if present. Default: `true`. |
@@ -138,11 +138,11 @@ public final class VAPView: UIView {
     ///
     /// ## Examples
     ///
-    /// **Basic — play a local file (HWD path, blendMode takes effect):**
+    /// **Basic — play a local file (HWD path, alphaPlacement takes effect):**
     /// ```swift
     /// let config = VAPPlayConfig(
     ///     filePath: Bundle.main.path(forResource: "animation", ofType: "mp4")!,
-    ///     blendMode: .alphaRight
+    ///     alphaPlacement: .right
     /// )
     /// vapView.play(config: config)
     /// ```
@@ -183,10 +183,10 @@ public final class VAPView: UIView {
     ///     attachmentSources: [
     ///         "avatar": .image(UIImage(named: "avatar")!),
     ///         "name":   .text("张三"),
-    ///         "banner": .url("https://example.com/banner.png"),
+    ///         "banner": .imageURL("https://example.com/banner.png"),
     ///     ],
     ///     imageLoader: { url, context in
-    ///         // Custom async image loading for .url attachments
+    ///         // Custom async image loading for .imageURL attachments
     ///         let (data, _) = try await URLSession.shared.data(from: url)
     ///         return UIImage(data: data) ?? UIImage()
     ///     }
@@ -199,7 +199,7 @@ public final class VAPView: UIView {
     /// let maskData = Data(repeating: 0xFF, count: 200 * 200) // R8 grayscale
     /// let config = VAPPlayConfig(
     ///     filePath: "path/to/animation.mp4",
-    ///     maskInfo: VAPMaskInfo(data: maskData, dataSize: CGSize(width: 200, height: 200))
+    ///     maskInfo: VAPMaskConfiguration(data: maskData, dataSize: CGSize(width: 200, height: 200))
     /// )
     /// vapView.play(config: config)
     /// ```
@@ -261,18 +261,18 @@ public final class VAPView: UIView {
 
     /// Convenience overload accepting individual parameters.
     public func play(filePath: String,
-                     blendMode: VAPTextureBlendMode = .alphaRight,
-                     backgroundPolicy: VAPBackgroundPolicy = .stop,
+                     alphaPlacement: VAPAlphaPlacement = .right,
+                     backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
                      contentMode: VAPContentMode = .scaleToFill,
                      attachmentSources: [String: VAPAttachmentSource] = [:],
-                     imageLoader: VAPImageLoader? = nil,
+                     imageLoader: VAPAttachmentImageLoader? = nil,
                      bufferCount: Int = 3,
-                     maskInfo: VAPMaskInfo? = nil,
+                     maskInfo: VAPMaskConfiguration? = nil,
                      playAudio: Bool = true,
                      onEvent: ((VAPEvent) -> Void)? = nil) {
         let config = VAPPlayConfig(
             filePath: filePath,
-            blendMode: blendMode,
+            alphaPlacement: alphaPlacement,
             backgroundPolicy: backgroundPolicy,
             contentMode: contentMode,
             attachmentSources: attachmentSources,

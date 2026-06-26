@@ -66,7 +66,7 @@ struct VAPMP4Parser {
         let hasAudio = hasAudioTrack(in: moov)
 
         guard let videoTrak = findVideoTrak(in: moov) else {
-            throw VAPError.cannotGetStream
+            throw VAPError.streamUnavailable
         }
 
         let (codec, avcC, hvcC) = videoCodecInfo(trak: videoTrak)
@@ -388,13 +388,13 @@ struct VAPMP4Parser {
     // MARK: - Sample table
 
     private static func buildSamples(trak: VAPMP4Box, timeScale: Double) throws -> [VAPMP4Sample] {
-        guard let stbl = trak.bfsFirst(type: "stbl") else { throw VAPError.cannotGetStreamInfo }
+        guard let stbl = trak.bfsFirst(type: "stbl") else { throw VAPError.streamInfoUnavailable }
 
         guard let stscBox = stbl.firstChild(type: "stsc"),
               case .stsc(let stscEntries) = stscBox.payload,
               let stszBox = stbl.firstChild(type: "stsz"),
               case .stsz(let defaultSize, let sizes) = stszBox.payload else {
-            throw VAPError.cannotGetStreamInfo
+            throw VAPError.streamInfoUnavailable
         }
 
         var deltas: [UInt32] = []
@@ -418,7 +418,7 @@ struct VAPMP4Parser {
         } else if let stcoBox = stbl.firstChild(type: "stco"), case .stco(let offs) = stcoBox.payload {
             chunkOffsets = offs.map(UInt64.init)
         } else {
-            throw VAPError.cannotGetStreamInfo
+            throw VAPError.streamInfoUnavailable
         }
 
         let sampleCount = sizes.isEmpty ? deltas.count : sizes.count
@@ -478,8 +478,11 @@ struct VAPMP4Parser {
     }
 
     private static func computeFPS(samples: [VAPMP4Sample], duration: Double) -> Int {
-        guard duration > 0 else { return kVAPDefaultFPS }
-        return max(kVAPMinFPS, min(Int((Double(samples.count) / duration).rounded()), kVAPMaxFPS))
+        guard duration > 0 else { return VAPPlaybackDefaults.defaultFramesPerSecond }
+        return max(
+            VAPPlaybackDefaults.minimumFramesPerSecond,
+            min(Int((Double(samples.count) / duration).rounded()), VAPPlaybackDefaults.maximumFramesPerSecond)
+        )
     }
 
     static func presentationIndices(pts: [Double], dts: [Double]) -> [Int] {

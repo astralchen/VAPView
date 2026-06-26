@@ -16,7 +16,7 @@ final class ViewController: UIViewController {
 
     private var giftEffects: [GiftEffect] = []
     private var selectedGiftIndex: Int?
-    private var selectedBlendMode: VAPTextureBlendMode = .alphaRight
+    private var selectedAlphaPlacement: VAPAlphaPlacement = .right
 
     private var selectedGift: GiftEffect? {
         guard let selectedGiftIndex, giftEffects.indices.contains(selectedGiftIndex) else {
@@ -197,7 +197,7 @@ final class ViewController: UIViewController {
             if giftEffects.isEmpty {
                 setStatus("Gift list is empty")
             } else {
-                setStatus("Ready - \(giftEffects.count) gifts - \(blendModeTitle(selectedBlendMode))")
+                setStatus("Ready - \(giftEffects.count) gifts - \(alphaPlacementTitle(selectedAlphaPlacement))")
             }
         } catch {
             giftEffects = []
@@ -211,13 +211,13 @@ final class ViewController: UIViewController {
     // MARK: - Actions
 
     @objc private func playLeftTapped() {
-        selectedBlendMode = .alphaLeft
+        selectedAlphaPlacement = .left
         updateAlphaButtons()
         startSelectedGift()
     }
 
     @objc private func playRightTapped() {
-        selectedBlendMode = .alphaRight
+        selectedAlphaPlacement = .right
         updateAlphaButtons()
         startSelectedGift()
     }
@@ -242,18 +242,18 @@ final class ViewController: UIViewController {
             setStatus("Select a gift first")
             return
         }
-        startPlay(effect: selectedGift, blendMode: selectedBlendMode)
+        startPlay(effect: selectedGift, alphaPlacement: selectedAlphaPlacement)
     }
 
-    private func startPlay(effect: GiftEffect, blendMode: VAPTextureBlendMode) {
-        print("[VAPDemo] play gift=\(effect.name) blendMode=\(blendMode)")
+    private func startPlay(effect: GiftEffect, alphaPlacement: VAPAlphaPlacement) {
+        print("[VAPDemo] play gift=\(effect.name) alphaPlacement=\(alphaPlacement)")
         progressBar.isHidden = true
         progressBar.progress = 0
-        setStatus("Starting - \(blendModeTitle(blendMode))")
+        setStatus("Starting - \(alphaPlacementTitle(alphaPlacement))")
 
         let config = VAPPlayConfig(
             filePath: effect.url,
-            blendMode: blendMode,
+            alphaPlacement: alphaPlacement,
             backgroundPolicy: .pauseAndResume,
             contentMode: .aspectFit,
             loopCount: 1
@@ -304,19 +304,19 @@ final class ViewController: UIViewController {
     }
 
     private func updateAlphaButtons() {
-        playLeftButton.alpha = selectedBlendMode == .alphaLeft ? 1 : 0.58
-        playRightButton.alpha = selectedBlendMode == .alphaRight ? 1 : 0.58
+        playLeftButton.alpha = selectedAlphaPlacement == .left ? 1 : 0.58
+        playRightButton.alpha = selectedAlphaPlacement == .right ? 1 : 0.58
     }
 
-    private func blendModeTitle(_ blendMode: VAPTextureBlendMode) -> String {
-        switch blendMode {
-        case .alphaLeft:
+    private func alphaPlacementTitle(_ alphaPlacement: VAPAlphaPlacement) -> String {
+        switch alphaPlacement {
+        case .left:
             return "Alpha Left"
-        case .alphaRight:
+        case .right:
             return "Alpha Right"
-        case .alphaTop:
+        case .top:
             return "Alpha Top"
-        case .alphaBottom:
+        case .bottom:
             return "Alpha Bottom"
         }
     }

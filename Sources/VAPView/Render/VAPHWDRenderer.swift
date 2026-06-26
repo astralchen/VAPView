@@ -36,10 +36,10 @@ final class VAPHWDRenderer {
     // MARK: - Render
 
     /// Render one decoded frame into `metalView`.
-    /// `blendMode` determines which half of the frame contains the alpha channel.
+    /// `alphaPlacement` determines which half of the frame contains the alpha channel.
     func render(pixelBuffer: CVPixelBuffer,
                 into metalView: VAPMetalView,
-                blendMode: VAPTextureBlendMode) {
+                alphaPlacement: VAPAlphaPlacement) {
         if metalView.metalLayer.device == nil {
             metalView.metalLayer.device = device
             rendererLog.debug("HWD: set metalLayer.device")
@@ -60,12 +60,12 @@ final class VAPHWDRenderer {
 
         let videoWidth  = CVPixelBufferGetWidth(pixelBuffer)
         let videoHeight = CVPixelBufferGetHeight(pixelBuffer)
-        let vertices = makeVertices(blendMode: blendMode,
+        let vertices = makeVertices(alphaPlacement: alphaPlacement,
                                    videoSize: CGSize(width: videoWidth, height: videoHeight),
                                    viewRect: metalView.vertexRect(
-                                       videoSize: vapRGBSize(blendMode: blendMode,
-                                                              videoWidth: videoWidth,
-                                                              videoHeight: videoHeight)))
+                                       videoSize: rgbContentSize(alphaPlacement: alphaPlacement,
+                                                                 videoWidth: videoWidth,
+                                                                 videoHeight: videoHeight)))
 
         guard let buffer = device.makeBuffer(bytes: vertices,
                                              length: vertices.count * MemoryLayout<VAPHWDVertex>.stride,
@@ -120,13 +120,13 @@ final class VAPHWDRenderer {
 
     // MARK: - Vertex helpers
 
-    private func makeVertices(blendMode: VAPTextureBlendMode,
+    private func makeVertices(alphaPlacement: VAPAlphaPlacement,
                               videoSize: CGSize,
                               viewRect: CGRect) -> [VAPHWDVertex] {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
-        // Normalized texture coordinates depend on blend mode
-        let (rgbTL, rgbBR, alphaTL, alphaBR) = Self.texCoords(blendMode: blendMode)
+        // Normalized texture coordinates depend on alpha placement
+        let (rgbTL, rgbBR, alphaTL, alphaBR) = Self.texCoords(alphaPlacement: alphaPlacement)
         // 4 vertices: TL, TR, BL, BR (triangle strip)
         return [
             VAPHWDVertex(position: SIMD4(l, t, 0, 1),
@@ -146,19 +146,19 @@ final class VAPHWDRenderer {
 
     /// Returns (rgbTopLeft, rgbBottomRight, alphaTopLeft, alphaBottomRight)
     /// in normalized UV space [0,1].
-    static func texCoords(blendMode: VAPTextureBlendMode)
+    static func texCoords(alphaPlacement: VAPAlphaPlacement)
         -> (SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>) {
-        switch blendMode {
-        case .alphaRight:
+        switch alphaPlacement {
+        case .right:
             return (SIMD2(0, 0), SIMD2(0.5, 1),
                     SIMD2(0.5, 0), SIMD2(1, 1))
-        case .alphaLeft:
+        case .left:
             return (SIMD2(0.5, 0), SIMD2(1, 1),
                     SIMD2(0, 0),   SIMD2(0.5, 1))
-        case .alphaBottom:
+        case .bottom:
             return (SIMD2(0, 0), SIMD2(1, 0.5),
                     SIMD2(0, 0.5), SIMD2(1, 1))
-        case .alphaTop:
+        case .top:
             return (SIMD2(0, 0.5), SIMD2(1, 1),
                     SIMD2(0, 0),   SIMD2(1, 0.5))
         }

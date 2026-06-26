@@ -19,9 +19,9 @@ struct VAPAttachmentResources: @unchecked Sendable {
 final class VAPConfigManager {
 
     private let device: MTLDevice
-    private let imageLoader: VAPImageLoader?
+    private let imageLoader: VAPAttachmentImageLoader?
 
-    init(device: MTLDevice, imageLoader: VAPImageLoader?) {
+    init(device: MTLDevice, imageLoader: VAPAttachmentImageLoader?) {
         self.device      = device
         self.imageLoader = imageLoader
     }
@@ -37,17 +37,17 @@ final class VAPConfigManager {
             let srcType = srcInfo.attachmentSourceType
             switch srcType {
             case .image, .imageURL:
-                let context = VAPImageContext(
-                    srcId: srcInfo.srcId,
-                    fitType: srcInfo.attachmentFitType,
+                let context = VAPAttachmentImageContext(
+                    sourceID: srcInfo.srcId,
+                    contentMode: srcInfo.attachmentFitType.publicContentMode,
                     targetSize: srcInfo.w.flatMap { w in srcInfo.h.map { h in CGSize(width: w, height: h) } },
-                    loadType: srcInfo.attachmentLoadType)
+                    loadLocation: srcInfo.attachmentLoadType?.publicLocation)
                 switch sources[srcInfo.srcId] {
                 case .image(let img):
                     if let tex = makeTexture(from: img) {
                         textures[srcInfo.srcId] = tex
                     }
-                case .url(let urlString):
+                case .imageURL(let urlString):
                     // [M4] 只允许 https/http/file scheme，防止 SSRF 类攻击
                     guard let url = URL(string: urlString),
                           ["https", "http", "file"].contains(url.scheme?.lowercased() ?? "") else {
@@ -55,7 +55,7 @@ final class VAPConfigManager {
                     }
                     // [BUG-C2] imageLoader 为 nil 时明确报错，避免纹理缺失却无任何提示
                     guard let loader = imageLoader else {
-                        throw VAPError.unknown("imageLoader is required for .url attachment (srcId: \(srcInfo.srcId))")
+                        throw VAPError.unknown("imageLoader is required for .imageURL attachment (sourceID: \(srcInfo.srcId))")
                     }
                     let image = try await loader(url, context)
                     if let tex = makeTexture(from: image) {
@@ -64,11 +64,11 @@ final class VAPConfigManager {
                 case .text, nil:
                     break
                 }
-            case .text, .textStr:
+            case .text, .textString:
                 let text: String
                 switch sources[srcInfo.srcId] {
                 case .text(let t): text = t
-                case .url(let s):  text = s
+                case .imageURL(let s):  text = s
                 default:           text = ""
                 }
                 let size = CGSize(width: srcInfo.w ?? 100, height: srcInfo.h ?? 40)

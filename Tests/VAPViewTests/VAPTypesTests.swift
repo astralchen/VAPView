@@ -7,26 +7,13 @@ import UIKit
 @Suite("VAPTypes")
 struct VAPTypesTests {
 
-    // MARK: - VAPTextureBlendMode
+    // MARK: - VAPAlphaPlacement
 
-    @Test func blendModeRawValues() {
-        #expect(VAPTextureBlendMode.alphaLeft.rawValue   == 0)
-        #expect(VAPTextureBlendMode.alphaRight.rawValue  == 1)
-        #expect(VAPTextureBlendMode.alphaTop.rawValue    == 2)
-        #expect(VAPTextureBlendMode.alphaBottom.rawValue == 3)
-    }
-
-    @Test func blendModeFromRawValue() {
-        #expect(VAPTextureBlendMode(rawValue: 1) == .alphaRight)
-        #expect(VAPTextureBlendMode(rawValue: 99) == nil)
-    }
-
-    // MARK: - VAPOrientation
-
-    @Test func orientationRawValues() {
-        #expect(VAPOrientation.none.rawValue      == 0)
-        #expect(VAPOrientation.portrait.rawValue  == 1)
-        #expect(VAPOrientation.landscape.rawValue == 2)
+    @Test func alphaPlacementRawValues() {
+        #expect(VAPAlphaPlacement.left.rawValue == 0)
+        #expect(VAPAlphaPlacement.right.rawValue == 1)
+        #expect(VAPAlphaPlacement.top.rawValue == 2)
+        #expect(VAPAlphaPlacement.bottom.rawValue == 3)
     }
 
     // MARK: - VAPError
@@ -50,36 +37,15 @@ struct VAPTypesTests {
         #expect((inner as NSError).code == 42)
     }
 
-    // MARK: - Constants
+    // MARK: - VAPPlaybackDefaults
 
-    @Test func constants() {
-        #expect(kVAPDefaultFPS == 25)
-        #expect(kVAPMinFPS == 1)
-        #expect(kVAPMaxFPS == 60)
-        #expect(kVAPMaxCompatibleVersion == 2)
-        #expect(kVAPMinFPS < kVAPDefaultFPS)
-        #expect(kVAPDefaultFPS < kVAPMaxFPS)
-    }
-
-    // MARK: - VAPAttachmentSourceType
-
-    @Test func attachmentSourceTypeRawValues() {
-        #expect(VAPAttachmentSourceType.text.rawValue     == "txt")
-        #expect(VAPAttachmentSourceType.textStr.rawValue  == "txtStr")
-        #expect(VAPAttachmentSourceType.image.rawValue    == "img")
-        #expect(VAPAttachmentSourceType.imageURL.rawValue == "imgUrl")
-    }
-
-    @Test func attachmentSourceTypeFromRawValue() {
-        #expect(VAPAttachmentSourceType(rawValue: "img") == .image)
-        #expect(VAPAttachmentSourceType(rawValue: "unknown") == nil)
-    }
-
-    // MARK: - VAPAttachmentFitType
-
-    @Test func fitTypeRawValues() {
-        #expect(VAPAttachmentFitType.fitXY.rawValue      == "fitXY")
-        #expect(VAPAttachmentFitType.centerFull.rawValue == "centerFull")
+    @Test func playbackDefaults() {
+        #expect(VAPPlaybackDefaults.defaultFramesPerSecond == 25)
+        #expect(VAPPlaybackDefaults.minimumFramesPerSecond == 1)
+        #expect(VAPPlaybackDefaults.maximumFramesPerSecond == 60)
+        #expect(VAPPlaybackDefaults.maximumCompatibleConfigVersion == 2)
+        #expect(VAPPlaybackDefaults.minimumFramesPerSecond < VAPPlaybackDefaults.defaultFramesPerSecond)
+        #expect(VAPPlaybackDefaults.defaultFramesPerSecond < VAPPlaybackDefaults.maximumFramesPerSecond)
     }
 
     // MARK: - VAPEvent
@@ -130,10 +96,13 @@ struct VAPTypesTests {
         #expect(i === img)
     }
 
-    @Test func attachmentSourceURL() {
-        let src = VAPAttachmentSource.url("https://example.com/img.png")
-        guard case .url(let s) = src else { Issue.record("wrong case"); return }
-        #expect(s == "https://example.com/img.png")
+    @Test func attachmentSourceImageURL() {
+        let source = VAPAttachmentSource.imageURL("https://example.com/img.png")
+        guard case .imageURL(let value) = source else {
+            Issue.record("wrong case")
+            return
+        }
+        #expect(value == "https://example.com/img.png")
     }
 
     @Test func attachmentSourceText() {
@@ -142,46 +111,29 @@ struct VAPTypesTests {
         #expect(t == "Hello")
     }
 
-    // MARK: - VAPMaskInfo
+    // MARK: - VAPMaskConfiguration
 
-    @Test func maskInfoDefaults() {
+    @Test func maskConfigurationDefaults() {
         let data = Data([0, 1, 0, 1])
-        let mask = VAPMaskInfo(data: data, dataSize: CGSize(width: 2, height: 2))
+        let mask = VAPMaskConfiguration(data: data, dataSize: CGSize(width: 2, height: 2))
         #expect(mask.data == data)
         #expect(mask.dataSize == CGSize(width: 2, height: 2))
         #expect(mask.sampleRect == .zero)
         #expect(mask.blurLength == 0)
     }
 
-    @Test func maskInfoCustomValues() {
-        let data = Data(repeating: 1, count: 100)
-        let mask = VAPMaskInfo(data: data,
-                               dataSize: CGSize(width: 10, height: 10),
-                               sampleRect: CGRect(x: 1, y: 2, width: 8, height: 8),
-                               blurLength: 4)
-        #expect(mask.sampleRect == CGRect(x: 1, y: 2, width: 8, height: 8))
-        #expect(mask.blurLength == 4)
-    }
+    // MARK: - VAPAttachmentImageContext
 
-    // MARK: - VAPImageContext
-
-    @Test func imageContextFields() {
-        let ctx = VAPImageContext(srcId: "avatar",
-                                  fitType: .fitXY,
-                                  targetSize: CGSize(width: 100, height: 50),
-                                  loadType: .network)
-        #expect(ctx.srcId == "avatar")
-        #expect(ctx.fitType == .fitXY)
-        #expect(ctx.targetSize == CGSize(width: 100, height: 50))
-        #expect(ctx.loadType == .network)
-    }
-
-    @Test func imageContextNilOptionals() {
-        let ctx = VAPImageContext(srcId: "bg",
-                                  fitType: .centerFull,
-                                  targetSize: nil,
-                                  loadType: nil)
-        #expect(ctx.targetSize == nil)
-        #expect(ctx.loadType == nil)
+    @Test func attachmentImageContextFields() {
+        let context = VAPAttachmentImageContext(
+            sourceID: "avatar",
+            contentMode: .scaleToFill,
+            targetSize: CGSize(width: 100, height: 50),
+            loadLocation: .remote
+        )
+        #expect(context.sourceID == "avatar")
+        #expect(context.contentMode == .scaleToFill)
+        #expect(context.targetSize == CGSize(width: 100, height: 50))
+        #expect(context.loadLocation == .remote)
     }
 }

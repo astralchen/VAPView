@@ -44,7 +44,7 @@ final class VAPRenderer {
 
     func render(pixelBuffer: CVPixelBuffer,
                 into metalView: VAPMetalView,
-                blendMode: VAPTextureBlendMode,
+                alphaPlacement: VAPAlphaPlacement,
                 config: VAPConfig?,
                 attachmentTextures: [String: MTLTexture],
                 maskTexture: MTLTexture?,
@@ -53,7 +53,7 @@ final class VAPRenderer {
             metalView.metalLayer.device = device
         }
         guard let drawable = metalView.metalLayer.nextDrawable() else { return }
-        rendererLog.debug("VAP render: blendMode=\(blendMode.rawValue) frame=\(frameIndex) hasConfig=\(config != nil) attachCount=\(attachmentTextures.count)")
+        rendererLog.debug("VAP render: alphaPlacement=\(alphaPlacement.rawValue) frame=\(frameIndex) hasConfig=\(config != nil) attachCount=\(attachmentTextures.count)")
 
         let desc = MTLRenderPassDescriptor()
         desc.colorAttachments[0].texture     = drawable.texture
@@ -66,7 +66,7 @@ final class VAPRenderer {
         // 1. Draw base YUV layer (with optional mask)
         if let encoder = cmdBuffer.makeRenderCommandEncoder(descriptor: desc) {
             drawYUVBase(pixelBuffer: pixelBuffer,
-                        blendMode: blendMode,
+                        alphaPlacement: alphaPlacement,
                         config: config,
                         metalView: metalView,
                         encoder: encoder)
@@ -100,7 +100,7 @@ final class VAPRenderer {
     // MARK: - Draw YUV base
 
     private func drawYUVBase(pixelBuffer: CVPixelBuffer,
-                             blendMode: VAPTextureBlendMode,
+                             alphaPlacement: VAPAlphaPlacement,
                              config: VAPConfig?,
                              metalView: VAPMetalView,
                              encoder: MTLRenderCommandEncoder) {
@@ -114,7 +114,7 @@ final class VAPRenderer {
         let vw = CVPixelBufferGetWidth(pixelBuffer)
         let vh = CVPixelBufferGetHeight(pixelBuffer)
 
-        // Determine display size and texture coordinates from vapc config or blend mode
+        // Determine display size and texture coordinates from vapc config or alpha placement
         let viewRect: CGRect
         let verts: [VAPSimpleVertex]
         if let info = config?.info,
@@ -129,12 +129,12 @@ final class VAPRenderer {
                                 alphaRect: alphaRect,
                                 videoWidth: CGFloat(info.videoW),
                                 videoHeight: CGFloat(info.videoH))
-            rendererLog.debug("VAP drawYUVBase: using vapc rgbFrame/aFrame (blendMode ignored). video=\(vw)x\(vh) canvas=\(info.w)x\(info.h) rgbFrame=\(rgbRect) aFrame=\(alphaRect)")
+            rendererLog.debug("VAP drawYUVBase: using vapc rgbFrame/aFrame (alphaPlacement ignored). video=\(vw)x\(vh) canvas=\(info.w)x\(info.h) rgbFrame=\(rgbRect) aFrame=\(alphaRect)")
         } else {
-            let rgbVideoSize = vapRGBSize(blendMode: blendMode, videoWidth: vw, videoHeight: vh)
+            let rgbVideoSize = rgbContentSize(alphaPlacement: alphaPlacement, videoWidth: vw, videoHeight: vh)
             viewRect = metalView.vertexRect(videoSize: rgbVideoSize)
-            verts = makeFullQuad(viewRect: viewRect, blendMode: blendMode)
-            rendererLog.debug("VAP drawYUVBase: full=\(vw)x\(vh) rgb=\(Int(rgbVideoSize.width))x\(Int(rgbVideoSize.height)) blendMode=\(blendMode.rawValue)")
+            verts = makeFullQuad(viewRect: viewRect, alphaPlacement: alphaPlacement)
+            rendererLog.debug("VAP drawYUVBase: full=\(vw)x\(vh) rgb=\(Int(rgbVideoSize.width))x\(Int(rgbVideoSize.height)) alphaPlacement=\(alphaPlacement.rawValue)")
         }
         rendererLog.debug("VAP drawYUVBase: viewRect=(\(viewRect.minX),\(viewRect.minY),\(viewRect.width),\(viewRect.height))")
 
@@ -249,20 +249,20 @@ final class VAPRenderer {
         ]
     }
 
-    /// Build a quad using simple blend mode split (50/50 left-right or top-bottom).
-    func makeFullQuad(viewRect: CGRect, blendMode: VAPTextureBlendMode) -> [VAPSimpleVertex] {
+    /// Build a quad using simple alpha-placement split (50/50 left-right or top-bottom).
+    func makeFullQuad(viewRect: CGRect, alphaPlacement: VAPAlphaPlacement) -> [VAPSimpleVertex] {
         let l = Float(viewRect.minX), r = Float(viewRect.maxX)
         let b = Float(viewRect.minY), t = Float(viewRect.maxY)
-        // Split the video frame into RGB half and alpha half based on blend mode
+        // Split the video frame into RGB half and alpha half based on alpha placement
         let (rgbTL, rgbBR, alphaTL, alphaBR): (SIMD2<Float>, SIMD2<Float>, SIMD2<Float>, SIMD2<Float>)
-        switch blendMode {
-        case .alphaRight:
+        switch alphaPlacement {
+        case .right:
             (rgbTL, rgbBR, alphaTL, alphaBR) = (SIMD2(0, 0), SIMD2(0.5, 1), SIMD2(0.5, 0), SIMD2(1, 1))
-        case .alphaLeft:
+        case .left:
             (rgbTL, rgbBR, alphaTL, alphaBR) = (SIMD2(0.5, 0), SIMD2(1, 1), SIMD2(0, 0), SIMD2(0.5, 1))
-        case .alphaBottom:
+        case .bottom:
             (rgbTL, rgbBR, alphaTL, alphaBR) = (SIMD2(0, 0), SIMD2(1, 0.5), SIMD2(0, 0.5), SIMD2(1, 1))
-        case .alphaTop:
+        case .top:
             (rgbTL, rgbBR, alphaTL, alphaBR) = (SIMD2(0, 0.5), SIMD2(1, 1), SIMD2(0, 0), SIMD2(1, 0.5))
         }
         return [
