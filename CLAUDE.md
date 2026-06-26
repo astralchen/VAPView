@@ -36,10 +36,11 @@ VAP (Video Alpha Protocol) encodes a transparent animation as a standard H.264/H
 
 ### Public API surface
 
-- **`VAPView: UIView`** (`@MainActor`) — the only integration point callers need. Owns a `VAPPlayer` internally, exposes `play(...)`, `stop()`, `pause()`, `resume()`. Playback events are delivered via the `eventHandler: ((VAPEvent) -> Void)?` closure passed to `play`.
-- **`VAPPlaybackConfiguration`** — value type passed to `play(...)`. Carries `source` (local path or HTTPS URL), `alphaPlacement`, `loopCount`, `attachmentSources`, `imageLoader`, `backgroundPolicy`, `contentMode`, etc.
+- **`VAPView: UIView`** (`@MainActor`) — the only integration point most callers need. Owns a `VAPPlayer` internally, exposes `VAPView.prefetch(source:using:progressHandler:)`, `VAPView.play(_:eventHandler:)`, `VAPView.play(source:...eventHandler:)`, `stop()`, `pause()`, and `resume()`. Playback events are delivered via the `eventHandler: ((VAPEvent) -> Void)?` closure passed to `play`.
+- **`VAPPlayer`** (`@MainActor`) — lower-level playback engine. Public playback entry point is `VAPPlayer.play(_:eventHandler:)`.
+- **`VAPPlaybackConfiguration`** — value type passed to `play(...)`. Carries `source` (local path or HTTPS URL), `alphaPlacement`, `loopCount`, `attachmentSources`, `imageLoader`, `backgroundPolicy`, `contentMode`, `preferredFramesPerSecond`, `playsAudio`, `frameBufferCapacity`, `mask`, etc.
 - **`VAPEvent`** — `AsyncStream`-based enum: `.didStart`, `.didPlayFrame`, `.didLoopFinish`, `.didFinish`, `.didStop`, `.downloading`, `.didFail`.
-- **`VAPResourceLoader` / `VAPDiskCache`** — protocol + default implementation for downloading remote URLs to a local cache before playback.
+- **`VAPResourceLoader` / `VAPResourceCacheCleaning` / `VAPDiskCache`** — resource loading and cache cleanup APIs. `VAPResourceLoader.resolveLocalPath(for:progressHandler:)` maps a source to a playable local path; `VAPResourceCacheCleaning.removeAllCachedResources()` clears cached resources. Concurrent requests for the same URL through the same `VAPDiskCache` instance, including `VAPView.prefetch(...)` plus `VAPView` playback, share one network download.
 
 ### Internal pipeline
 

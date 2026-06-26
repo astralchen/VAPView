@@ -123,8 +123,8 @@ Each video frame is split spatially into two halves — one carries RGB content,
 | Property / Method | Description |
 |---|---|
 | `VAPView.prefetch(source:using:progressHandler:)` | Download/cache a resource before any view exists |
-| `play(_:eventHandler:)` | Start playback with a `VAPPlaybackConfiguration` |
-| `play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | Start playback with individual parameters |
+| `VAPPlayer.play(_:eventHandler:)` / `VAPView.play(_:eventHandler:)` | Start playback with a `VAPPlaybackConfiguration` |
+| `VAPView.play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | Start playback with individual parameters |
 | `stop()` | Stop and release resources |
 | `pause()` | Pause playback |
 | `resume()` | Resume playback |
@@ -205,6 +205,10 @@ public protocol VAPResourceLoader: AnyObject, Sendable {
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+public protocol VAPResourceCacheCleaning: AnyObject {
+    func removeAllCachedResources() throws
 }
 
 final class CustomResourceLoader: VAPResourceLoader {

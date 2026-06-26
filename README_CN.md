@@ -126,8 +126,8 @@ vapView.play(config)
 | 属性 / 方法 | 说明 |
 |---|---|
 | `VAPView.prefetch(source:using:progressHandler:)` | 在没有视图实例时预下载/缓存资源 |
-| `play(_:eventHandler:)` | 使用 `VAPPlaybackConfiguration` 开始播放 |
-| `play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | 使用独立参数开始播放 |
+| `VAPPlayer.play(_:eventHandler:)` / `VAPView.play(_:eventHandler:)` | 使用 `VAPPlaybackConfiguration` 开始播放 |
+| `VAPView.play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | 使用独立参数开始播放 |
 | `stop()` | 停止并释放资源 |
 | `pause()` | 暂停播放 |
 | `resume()` | 恢复播放 |
@@ -208,6 +208,10 @@ public protocol VAPResourceLoader: AnyObject, Sendable {
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+public protocol VAPResourceCacheCleaning: AnyObject {
+    func removeAllCachedResources() throws
 }
 
 final class CustomResourceLoader: VAPResourceLoader {
