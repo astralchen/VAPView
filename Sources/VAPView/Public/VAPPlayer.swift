@@ -115,7 +115,7 @@ public final class VAPPlayer {
     // MARK: - Public API
 
     public func play(_ configuration: VAPPlaybackConfiguration, eventHandler: ((VAPEvent) -> Void)? = nil) {
-        stop()
+        stop(emitEvent: false)
         playbackGeneration &+= 1
         currentConfiguration = configuration
         currentFrameIndex = 0
@@ -129,19 +129,59 @@ public final class VAPPlayer {
     }
 
     public func stop() {
+        stop(emitEvent: true)
+    }
+
+    func stopForReplacement() {
+        stop(emitEvent: false)
+    }
+
+    private func stop(emitEvent shouldEmitStop: Bool) {
+        let lastFrame = currentFrameIndex
+        let hasActivePlayback = playbackTask != nil
+        let handler = eventHandler
+
+        playbackGeneration &+= 1
         playbackTask?.cancel()
         playbackTask = nil
-        currentFrameIndex = 0
-        eventHandler = nil
         stopAudio()
         removeBackgroundObservers()
         currentConfiguration = nil
+        currentFrameIndex = 0
+        eventHandler = nil
+
+        if shouldEmitStop && hasActivePlayback {
+            deliverEvent(.didStop(lastFrame: lastFrame), to: handler)
+        }
+    }
+
+    private func deliverEvent(_ event: VAPEvent) {
+        _eventContinuation.yield(event)
+        eventHandler?(event)
+    }
+
+    private func deliverEvent(_ event: VAPEvent, to handler: ((VAPEvent) -> Void)?) {
+        _eventContinuation.yield(event)
+        handler?(event)
     }
 
     private func emitEvent(_ event: VAPEvent, generation: Int) {
         guard generation == self.playbackGeneration else { return }
-        _eventContinuation.yield(event)
-        eventHandler?(event)
+        deliverEvent(event)
+    }
+
+    private func completePlayback(with event: VAPEvent, generation: Int) {
+        guard generation == playbackGeneration else { return }
+        let handler = eventHandler
+
+        playbackTask = nil
+        stopAudio()
+        removeBackgroundObservers()
+        currentConfiguration = nil
+        currentFrameIndex = 0
+        eventHandler = nil
+
+        deliverEvent(event, to: handler)
     }
 
     public func pause() {
@@ -241,6 +281,7 @@ public final class VAPPlayer {
             }
 
             // 6. Outer loop — Metal/texture/audio objects are reused across all cycles
+            var didFinishPlayback = false
             repeat {
                 // Reset decoder for cycles after the first
                 if loopIndex > 0 {
@@ -273,8 +314,6 @@ public final class VAPPlayer {
                     if Task.isCancelled {
                         decodeProducer.cancel()
                         stopAudio()
-                        playerLog.debug("didStop lastFrame=\(frameIndex)")
-                        emitEvent(.didStop(lastFrame: frameIndex), generation: generation)
                         await decoder.invalidate()
                         return
                     }
@@ -334,7 +373,7 @@ public final class VAPPlayer {
                 let isLastCycle = loopCount != 0 && loopIndex >= loopCount
                 if isLastCycle {
                     playerLog.debug("didFinish totalFrames=\(totalFrames)")
-                    emitEvent(.didFinish(totalFrames: totalFrames), generation: generation)
+                    didFinishPlayback = true
                 } else {
                     playerLog.debug("didLoopFinish loop=\(loopIndex) totalFrames=\(totalFrames)")
                     emitEvent(.didLoopFinish(loop: loopIndex, totalFrames: totalFrames), generation: generation)
@@ -343,14 +382,17 @@ public final class VAPPlayer {
             } while loopCount == 0 || loopIndex < loopCount
 
             await decoder.invalidate()
+            if didFinishPlayback {
+                completePlayback(with: .didFinish(totalFrames: totalFrames), generation: generation)
+            }
 
         } catch let error as VAPError {
             playerLog.error("VAPError: \(Self.logDescription(for: error))")
-            emitEvent(.didFail(error), generation: generation)
+            completePlayback(with: .didFail(error), generation: generation)
         } catch {
             if !Task.isCancelled {
                 playerLog.error("Unknown error: \(Self.logDescription(for: error))")
-                emitEvent(.didFail(.unknown(error.localizedDescription)), generation: generation)
+                completePlayback(with: .didFail(.unknown(error.localizedDescription)), generation: generation)
             }
         }
     }

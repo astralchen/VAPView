@@ -222,7 +222,7 @@ public final class VAPView: UIView {
         // Stop any existing playback but keep player/metalView alive for reuse.
         playTask?.cancel()
         playTask = nil
-        player?.stop()
+        player?.stopForReplacement()
 
         ensurePlayer()
         guard let p = player else { return }
