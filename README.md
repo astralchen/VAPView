@@ -46,24 +46,16 @@ import UIKit
 
 class ViewController: UIViewController {
 
-    let vapView = VAPView()
-
     override func viewDidLoad() {
         super.viewDidLoad()
-        vapView.frame = view.bounds
+        let vapView = VAPView(frame: view.bounds)
         view.addSubview(vapView)
 
         vapView.play(
-            filePath: "path/to/animation.mp4",
-            blendMode: .alphaRight,
-            loopCount: 1,
-            onEvent: { event in
-                switch event {
-                case .didStart:            print("started")
-                case .didFinish:           print("finished")
-                case .didFail(let error):  print("error:", error)
-                default: break
-                }
+            source: "path/to/animation.mp4",
+            alphaPlacement: .right,
+            eventHandler: { event in
+                print(event)
             }
         )
     }
@@ -73,16 +65,18 @@ class ViewController: UIViewController {
 ### Remote URL with download progress
 
 ```swift
-vapView.play(
-    filePath: "https://example.com/animation.mp4",
-    blendMode: .alphaRight,
-    loopCount: 0,   // 0 = infinite loop
-    onEvent: { event in
-        if case .downloading(let progress) = event {
-            print("download progress:", progress)
-        }
-    }
+let configuration = VAPPlaybackConfiguration(
+    source: "https://example.com/animation.mp4",
+    backgroundPolicy: .pauseAndResume,
+    contentMode: .aspectFit,
+    loopCount: 3
 )
+
+vapView.play(configuration) { event in
+    if case .downloading(let progress) = event {
+        print(progress)
+    }
+}
 ```
 
 ### Image & text attachments
@@ -90,13 +84,13 @@ vapView.play(
 VAP supports per-frame attachment slots defined in the embedded `vapc` JSON config. Supply sources by `srcId`:
 
 ```swift
-let config = VAPPlayConfig(
-    filePath: "path/to/animation.mp4",
-    blendMode: .alphaRight,
+let configuration = VAPPlaybackConfiguration(
+    source: "path/to/animation.mp4",
+    alphaPlacement: .right,
     attachmentSources: [
         "avatar":   .image(UIImage(named: "avatar")!),
         "username": .text("Hello, VAP!"),
-        "banner":   .url("https://example.com/banner.png"),
+        "banner":   .imageURL("https://example.com/banner.png"),
     ],
     imageLoader: { url, context in
         // Your async image loading implementation
@@ -104,21 +98,21 @@ let config = VAPPlayConfig(
     },
     loopCount: 3
 )
-vapView.play(config: config, onEvent: nil)
+vapView.play(configuration)
 ```
 
 ---
 
 ## VAP Format
 
-Each video frame is split spatially into two halves — one carries RGB content, the other the alpha mask. The Metal shader composites them into a transparent BGRA frame.
+Each video frame is split spatially into two halves — one carries RGB content, the other the alpha mask. The Metal shader composites them into a transparent BGRA frame. For videos without embedded `vapc` frame-region metadata, choose the alpha half with `VAPAlphaPlacement`.
 
-| `VAPTextureBlendMode` | Alpha half position |
+| `VAPAlphaPlacement` | Alpha half position |
 |---|---|
-| `.alphaLeft` | Left |
-| `.alphaRight` | Right (default) |
-| `.alphaTop` | Top |
-| `.alphaBottom` | Bottom |
+| `.left` | Left |
+| `.right` | Right (default) |
+| `.top` | Top |
+| `.bottom` | Bottom |
 
 ---
 
@@ -128,28 +122,33 @@ Each video frame is split spatially into two halves — one carries RGB content,
 
 | Property / Method | Description |
 |---|---|
-| `VAPView.prefetch(filePath:resourceLoader:onProgress:)` | Download/cache a resource before any view exists |
-| `play(config:onEvent:)` | Start playback |
+| `VAPView.prefetch(source:using:progressHandler:)` | Download/cache a resource before any view exists |
+| `play(_:eventHandler:)` | Start playback with a `VAPPlaybackConfiguration` |
+| `play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | Start playback with individual parameters |
 | `stop()` | Stop and release resources |
 | `pause()` | Pause playback |
 | `resume()` | Resume playback |
 | `resourceLoader` | Custom download/cache handler (default: `VAPDiskCache.shared`) |
-| `autoDestroyAfterFinish` | Release Metal objects after playback finishes |
-| `shouldStartPlay` | Callback invoked before playback; return `false` to cancel |
+| `automaticallyDestroysPlayerAfterPlayback` | Release Metal objects after playback finishes |
+| `preferredFramesPerSecond` | Override playback FPS; `0` uses the MP4 header value |
+| `isMuted` | Mute or unmute playback audio |
+| `shouldStartPlayback` | Invoked before playback; return `false` to cancel |
 
-### `VAPPlayConfig`
+### `VAPPlaybackConfiguration`
 
 | Property | Description |
 |---|---|
-| `filePath` | Local file path or `http(s)://` URL |
-| `blendMode` | Alpha channel position in the frame |
+| `source` | Local file path or HTTPS URL |
+| `alphaPlacement` | Alpha channel position in the frame for videos without `vapc` frame-region metadata |
 | `loopCount` | `1` = play once, `0` = infinite, `N` = N times |
-| `backgroundPolicy` | `.stop` / `.pauseAndResume` / `.doNothing` |
+| `backgroundPolicy` | `.stop` / `.pauseAndResume` / `.ignore` |
 | `contentMode` | `.scaleToFill` / `.aspectFit` / `.aspectFill` |
-| `attachmentSources` | `[srcId: VAPAttachmentSource]` — image, URL, or text |
+| `attachmentSources` | `[srcId: VAPAttachmentSource]` — image, image URL, or text |
 | `imageLoader` | Async closure for loading URL-based attachments |
-| `playAudio` | Whether to play the audio track |
-| `bufferCount` | Decode buffer depth (default: `3`) |
+| `preferredFramesPerSecond` | Override playback FPS; `0` uses the MP4 header value |
+| `playsAudio` | Whether to play the audio track |
+| `frameBufferCapacity` | Decode buffer depth (default: `3`) |
+| `mask` | Optional external alpha mask for the VAP renderer path |
 
 ### `VAPEvent`
 
@@ -193,8 +192,8 @@ The default `VAPDiskCache` downloads remote files to `<Caches>/com.vap/resources
 You can also warm the cache before creating a view:
 
 ```swift
-try await VAPView.prefetch(filePath: "https://example.com/gift.mp4") { progress in
-    print("prefetch:", progress)
+try await VAPView.prefetch(source: "https://example.com/gift.mp4") { progress in
+    print(progress)
 }
 ```
 
@@ -202,12 +201,23 @@ Concurrent requests for the same URL through the same `VAPDiskCache` instance sh
 
 ```swift
 public protocol VAPResourceLoader: AnyObject, Sendable {
-    @concurrent func localPath(for filePath: String,
-                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+    @concurrent func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String
+}
+
+final class CustomResourceLoader: VAPResourceLoader {
+    @concurrent func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String {
+        source
+    }
 }
 
 // Assign before calling play:
-vapView.resourceLoader = MyCustomLoader()
+vapView.resourceLoader = CustomResourceLoader()
 ```
 
 ---

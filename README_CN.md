@@ -46,24 +46,16 @@ import UIKit
 
 class ViewController: UIViewController {
 
-    let vapView = VAPView()
-
     override func viewDidLoad() {
         super.viewDidLoad()
-        vapView.frame = view.bounds
+        let vapView = VAPView(frame: view.bounds)
         view.addSubview(vapView)
 
         vapView.play(
-            filePath: "path/to/animation.mp4",
-            blendMode: .alphaRight,
-            loopCount: 1,
-            onEvent: { event in
-                switch event {
-                case .didStart:           print("开始播放")
-                case .didFinish:          print("播放完成")
-                case .didFail(let error): print("错误:", error)
-                default: break
-                }
+            source: "path/to/animation.mp4",
+            alphaPlacement: .right,
+            eventHandler: { event in
+                print(event)
             }
         )
     }
@@ -73,16 +65,21 @@ class ViewController: UIViewController {
 ### 远程 URL 播放（带下载进度）
 
 ```swift
-vapView.play(
-    filePath: "https://example.com/animation.mp4",
-    blendMode: .alphaRight,
-    loopCount: 0,   // 0 = 无限循环
-    onEvent: { event in
-        if case .downloading(let progress) = event {
-            print("下载进度:", progress)
-        }
-    }
+let config = VAPPlaybackConfiguration(
+    source: "https://example.com/animation.mp4",
+    backgroundPolicy: .pauseAndResume,
+    contentMode: .aspectFit,
+    loopCount: 3
 )
+
+vapView.play(config) { event in
+    switch event {
+    case .downloading(let progress):
+        print(progress)
+    default:
+        break
+    }
+}
 ```
 
 ### 图片与文字叠加（Attachment）
@@ -90,13 +87,13 @@ vapView.play(
 VAP 支持通过内嵌的 `vapc` JSON 配置定义每帧的挂件槽，按 `srcId` 提供内容：
 
 ```swift
-let config = VAPPlayConfig(
-    filePath: "path/to/animation.mp4",
-    blendMode: .alphaRight,
+let config = VAPPlaybackConfiguration(
+    source: "path/to/animation.mp4",
+    alphaPlacement: .right,
     attachmentSources: [
         "avatar":   .image(UIImage(named: "avatar")!),
         "username": .text("你好，VAP!"),
-        "banner":   .url("https://example.com/banner.png"),
+        "banner":   .imageURL("https://example.com/banner.png"),
     ],
     imageLoader: { url, context in
         // 自定义异步图片加载实现
@@ -104,21 +101,21 @@ let config = VAPPlayConfig(
     },
     loopCount: 3
 )
-vapView.play(config: config, onEvent: nil)
+vapView.play(config)
 ```
 
 ---
 
 ## VAP 格式说明
 
-每帧视频在空间上被分为两个半区：一个承载 RGB 内容，另一个承载 Alpha 蒙版。Metal 着色器将二者合成为带透明通道的 BGRA 帧。
+每帧视频在空间上被分为两个半区：一个承载 RGB 内容，另一个承载 Alpha 蒙版。Metal 着色器将二者合成为带透明通道的 BGRA 帧。对于没有内嵌 `vapc` 帧区域信息的视频，使用 `VAPAlphaPlacement` 指定 Alpha 半区。
 
-| `VAPTextureBlendMode` | Alpha 半区位置 |
+| `VAPAlphaPlacement` | Alpha 半区位置 |
 |---|---|
-| `.alphaLeft` | 左 |
-| `.alphaRight` | 右（默认）|
-| `.alphaTop` | 上 |
-| `.alphaBottom` | 下 |
+| `.left` | 左 |
+| `.right` | 右（默认）|
+| `.top` | 上 |
+| `.bottom` | 下 |
 
 ---
 
@@ -128,28 +125,33 @@ vapView.play(config: config, onEvent: nil)
 
 | 属性 / 方法 | 说明 |
 |---|---|
-| `VAPView.prefetch(filePath:resourceLoader:onProgress:)` | 在没有视图实例时预下载/缓存资源 |
-| `play(config:onEvent:)` | 开始播放 |
+| `VAPView.prefetch(source:using:progressHandler:)` | 在没有视图实例时预下载/缓存资源 |
+| `play(_:eventHandler:)` | 使用 `VAPPlaybackConfiguration` 开始播放 |
+| `play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | 使用独立参数开始播放 |
 | `stop()` | 停止并释放资源 |
 | `pause()` | 暂停播放 |
 | `resume()` | 恢复播放 |
 | `resourceLoader` | 自定义下载/缓存器（默认：`VAPDiskCache.shared`）|
-| `autoDestroyAfterFinish` | 播放完成后自动释放 Metal 对象 |
-| `shouldStartPlay` | 播放前回调，返回 `false` 可取消播放 |
+| `automaticallyDestroysPlayerAfterPlayback` | 播放完成后自动释放 Metal 对象 |
+| `preferredFramesPerSecond` | 覆盖播放帧率；`0` 表示使用 MP4 头信息 |
+| `isMuted` | 静音或取消静音 |
+| `shouldStartPlayback` | 播放前调用，返回 `false` 可取消播放 |
 
-### `VAPPlayConfig`
+### `VAPPlaybackConfiguration`
 
 | 属性 | 说明 |
 |---|---|
-| `filePath` | 本地文件路径或 `http(s)://` 远程 URL |
-| `blendMode` | Alpha 通道在帧中的位置 |
+| `source` | 本地文件路径或 HTTPS 远程 URL |
+| `alphaPlacement` | 没有 `vapc` 帧区域信息时的 Alpha 通道位置 |
 | `loopCount` | `1` = 播放一次，`0` = 无限循环，`N` = 播放 N 次 |
-| `backgroundPolicy` | `.stop` / `.pauseAndResume` / `.doNothing` |
+| `backgroundPolicy` | `.stop` / `.pauseAndResume` / `.ignore` |
 | `contentMode` | `.scaleToFill` / `.aspectFit` / `.aspectFill` |
-| `attachmentSources` | `[srcId: VAPAttachmentSource]`，支持图片、URL、文本 |
+| `attachmentSources` | `[srcId: VAPAttachmentSource]`，支持图片、图片 URL、文本 |
 | `imageLoader` | 用于加载 URL 类型挂件的异步闭包 |
-| `playAudio` | 是否播放视频音轨 |
-| `bufferCount` | 解码缓冲深度（默认：`3`）|
+| `preferredFramesPerSecond` | 覆盖播放帧率；`0` 表示使用 MP4 头信息 |
+| `playsAudio` | 是否播放视频音轨 |
+| `frameBufferCapacity` | 解码缓冲深度（默认：`3`）|
+| `mask` | 可选外部 Alpha 蒙版，仅用于 VAP 渲染路径 |
 
 ### `VAPEvent`
 
@@ -193,8 +195,8 @@ VAPLogging.configure(
 也可以在创建视图前预热缓存：
 
 ```swift
-try await VAPView.prefetch(filePath: "https://example.com/gift.mp4") { progress in
-    print("prefetch:", progress)
+try await VAPView.prefetch(source: "https://example.com/gift.mp4") { progress in
+    print(progress)
 }
 ```
 
@@ -202,12 +204,23 @@ try await VAPView.prefetch(filePath: "https://example.com/gift.mp4") { progress 
 
 ```swift
 public protocol VAPResourceLoader: AnyObject, Sendable {
-    @concurrent func localPath(for filePath: String,
-                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+    @concurrent func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String
+}
+
+final class CustomResourceLoader: VAPResourceLoader {
+    @concurrent func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String {
+        source
+    }
 }
 
 // 在调用 play 前赋值：
-vapView.resourceLoader = MyCustomLoader()
+vapView.resourceLoader = CustomResourceLoader()
 ```
 
 ---
