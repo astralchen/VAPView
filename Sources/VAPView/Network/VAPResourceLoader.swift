@@ -4,6 +4,16 @@
 
 import Foundation
 
+/// 远程资源在默认缓存中的当前状态。
+public enum VAPCacheStatus: Equatable, Sendable {
+    /// 文件已存在于本地缓存。
+    case cached(localPath: String)
+    /// 文件正在下载；进度未知时为 nil。
+    case downloading(progress: Double?)
+    /// 没有可用缓存，也没有进行中的下载。
+    case missing
+}
+
 /// 将本地路径或远程 URL 字符串解析为本地可读文件路径。
 ///
 /// 默认实现为 `VAPDiskCache.shared`。
@@ -18,6 +28,12 @@ public protocol VAPResourceLoader: AnyObject, Sendable {
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+/// 为支持状态查询的资源缓存提供统一接口。
+public protocol VAPResourceCacheStatusProviding: AnyObject, Sendable {
+    /// 返回给定 source 当前的缓存/下载状态。
+    @concurrent func cacheStatus(for source: String) async -> VAPCacheStatus
 }
 
 /// 为持有本地缓存文件的加载器提供缓存管理能力。

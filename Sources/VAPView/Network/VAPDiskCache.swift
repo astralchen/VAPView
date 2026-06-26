@@ -12,7 +12,7 @@ private typealias VAPResourceProgressHandler = @MainActor @Sendable (Double) -> 
 /// - 缓存目录：`<Caches>/com.vap/resources/`
 /// - 缓存 key：URL 字符串的 SHA-256 十六进制值 + 原始文件扩展名
 /// - 同一个 URL 的并发请求会共享同一次下载。
-public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
+public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning, VAPResourceCacheStatusProviding {
 
     public static let shared = VAPDiskCache()
 
@@ -53,8 +53,7 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
         guard let url = URL(string: source) else {
             throw VAPError.fileNotFound(source)
         }
-        let cacheKey = cacheFileName(for: source, pathExtension: url.pathExtension)
-        let destination = cacheDirectory.appendingPathComponent(cacheKey)
+        let destination = cacheDestination(for: source, url: url)
         if FileManager.default.fileExists(atPath: destination.path) {
             return destination.path
         }
@@ -68,7 +67,42 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
         }
     }
 
+    @concurrent public func cacheStatus(for source: String) async -> VAPCacheStatus {
+        guard let destination = cacheDestination(for: source) else {
+            return .missing
+        }
+        if FileManager.default.fileExists(atPath: destination.path) {
+            return .cached(localPath: destination.path)
+        }
+        let inflight = await inflightActor.status(for: destination.path)
+        if inflight.isDownloading {
+            return .downloading(progress: inflight.progress)
+        }
+        return .missing
+    }
+
+    /// 返回指定远程 URL 已缓存的本地文件路径；未缓存或 URL 不合法时返回 nil。
+    public func cachedLocalPath(for source: String) -> String? {
+        guard let destination = cacheDestination(for: source) else {
+            return nil
+        }
+        return FileManager.default.fileExists(atPath: destination.path) ? destination.path : nil
+    }
+
     // MARK: - 私有方法
+
+    private func cacheDestination(for source: String) -> URL? {
+        guard source.hasPrefix("http://") || source.hasPrefix("https://"),
+              let url = URL(string: source) else {
+            return nil
+        }
+        return cacheDestination(for: source, url: url)
+    }
+
+    private func cacheDestination(for source: String, url: URL) -> URL {
+        let cacheKey = cacheFileName(for: source, pathExtension: url.pathExtension)
+        return cacheDirectory.appendingPathComponent(cacheKey)
+    }
 
     private func cacheFileName(for urlString: String, pathExtension: String) -> String {
         let hash = SHA256.hash(data: Data(urlString.utf8))
@@ -133,6 +167,13 @@ private actor InflightActor {
     }
 
     func remove(for key: String) { entries.removeValue(forKey: key) }
+
+    func status(for key: String) -> (isDownloading: Bool, progress: Double?) {
+        guard let entry = entries[key] else {
+            return (false, nil)
+        }
+        return (true, entry.latestProgress)
+    }
 
     private func emitProgress(_ progress: Double, for key: String) async {
         guard var entry = entries[key] else { return }

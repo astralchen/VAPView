@@ -110,6 +110,16 @@ public final class VAPView: UIView {
         return try await resourceLoader.resolveLocalPath(for: source, progressHandler: handler)
     }
 
+    /// 查询远程资源当前的缓存/下载状态。
+    ///
+    /// 默认查询 ``VAPDiskCache/shared``。如果业务替换了资源缓存，也可以传入自定义状态提供者。
+    @concurrent public nonisolated static func cacheStatus(
+        source: String,
+        using statusProvider: VAPResourceCacheStatusProviding = VAPDiskCache.shared
+    ) async -> VAPCacheStatus {
+        await statusProvider.cacheStatus(for: source)
+    }
+
     /// 播放 VAP/HWD 动画文件。
     ///
     /// 渲染器会根据 MP4 内容自动选择合适的渲染管线：

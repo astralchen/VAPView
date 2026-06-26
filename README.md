@@ -123,6 +123,7 @@ Each video frame is split spatially into two halves — one carries RGB content,
 | Property / Method | Description |
 |---|---|
 | `VAPView.prefetch(source:using:progressHandler:)` | Download/cache a resource before any view exists |
+| `VAPView.cacheStatus(source:using:)` | Query whether a remote resource is cached, downloading, or missing |
 | `VAPPlayer.play(_:eventHandler:)` / `VAPView.play(_:eventHandler:)` | Start playback with a `VAPPlaybackConfiguration` |
 | `VAPView.play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | Start playback with individual parameters |
 | `stop()` | Stop and release resources |
@@ -162,6 +163,14 @@ case downloading(progress: Double)
 case didFail(VAPError)
 ```
 
+### `VAPCacheStatus`
+
+```swift
+case cached(localPath: String)
+case downloading(progress: Double?)
+case missing
+```
+
 ---
 
 ## Logging
@@ -199,12 +208,29 @@ try await VAPView.prefetch(source: "https://example.com/gift.mp4") { progress in
 
 Concurrent requests for the same URL through the same `VAPDiskCache` instance share one network request. For example, if `VAPView.prefetch(...)` and `vapView.play(...)` are started with the same URL at the same time, playback waits for the shared download instead of starting another request, and both callers receive progress callbacks.
 
+External code can query the current cache state directly:
+
+```swift
+switch await VAPView.cacheStatus(source: remoteURL) {
+case .cached(let localPath):
+    print("Cached at \(localPath)")
+case .downloading(let progress):
+    print("Downloading \(progress ?? 0)")
+case .missing:
+    print("Not cached")
+}
+```
+
 ```swift
 public protocol VAPResourceLoader: AnyObject, Sendable {
     @concurrent func resolveLocalPath(
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+public protocol VAPResourceCacheStatusProviding: AnyObject, Sendable {
+    @concurrent func cacheStatus(for source: String) async -> VAPCacheStatus
 }
 
 public protocol VAPResourceCacheCleaning: AnyObject {

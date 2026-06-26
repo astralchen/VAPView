@@ -126,6 +126,7 @@ vapView.play(config)
 | 属性 / 方法 | 说明 |
 |---|---|
 | `VAPView.prefetch(source:using:progressHandler:)` | 在没有视图实例时预下载/缓存资源 |
+| `VAPView.cacheStatus(source:using:)` | 查询远程资源当前是已缓存、下载中还是未缓存 |
 | `VAPPlayer.play(_:eventHandler:)` / `VAPView.play(_:eventHandler:)` | 使用 `VAPPlaybackConfiguration` 开始播放 |
 | `VAPView.play(source:alphaPlacement:backgroundPolicy:contentMode:attachmentSources:imageLoader:frameBufferCapacity:mask:playsAudio:loopCount:eventHandler:)` | 使用独立参数开始播放 |
 | `stop()` | 停止并释放资源 |
@@ -165,6 +166,14 @@ case downloading(progress: Double)               // 远程资源下载进度
 case didFail(VAPError)                           // 发生错误
 ```
 
+### `VAPCacheStatus`
+
+```swift
+case cached(localPath: String)       // 已缓存，并返回本地文件路径
+case downloading(progress: Double?)  // 正在下载；进度未知时为 nil
+case missing                         // 未缓存，也没有进行中的下载
+```
+
 ---
 
 ## 日志
@@ -202,12 +211,29 @@ try await VAPView.prefetch(source: "https://example.com/gift.mp4") { progress in
 
 通过同一个 `VAPDiskCache` 实例请求同一个 URL 时，并发请求会共用一次网络下载。例如 `VAPView.prefetch(...)` 和 `vapView.play(...)` 同时加载同一个 URL，播放会等待共享下载完成，不会再发起第二个请求，并且两个调用方都会收到进度回调。
 
+外部业务可以直接查询当前缓存状态：
+
+```swift
+switch await VAPView.cacheStatus(source: remoteURL) {
+case .cached(let localPath):
+    print("已缓存：\(localPath)")
+case .downloading(let progress):
+    print("下载中：\(progress ?? 0)")
+case .missing:
+    print("未缓存")
+}
+```
+
 ```swift
 public protocol VAPResourceLoader: AnyObject, Sendable {
     @concurrent func resolveLocalPath(
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
     ) async throws -> String
+}
+
+public protocol VAPResourceCacheStatusProviding: AnyObject, Sendable {
+    @concurrent func cacheStatus(for source: String) async -> VAPCacheStatus
 }
 
 public protocol VAPResourceCacheCleaning: AnyObject {

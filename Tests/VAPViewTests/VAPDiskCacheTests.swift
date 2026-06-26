@@ -230,6 +230,38 @@ struct VAPDiskCacheTests {
         #expect(content == Data("cached content".utf8))
     }
 
+    @Test func cachedLocalPathReflectsDiskState() async throws {
+        mockShouldFail = false
+        mockResponseData = Data("restored cache content".utf8)
+        let dir = tmpCacheDir()
+        let cache = makeMockCache(tmpDir: dir)
+        let url = "https://example.com/restored.mp4"
+
+        #expect(cache.cachedLocalPath(for: url) == nil)
+
+        let downloadedPath = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
+        #expect(cache.cachedLocalPath(for: url) == downloadedPath)
+
+        try cache.removeAllCachedResources()
+        #expect(cache.cachedLocalPath(for: url) == nil)
+    }
+
+    @Test func cacheStatusReflectsMissingCachedAndClearedDiskState() async throws {
+        mockShouldFail = false
+        mockResponseData = Data("status cache content".utf8)
+        let dir = tmpCacheDir()
+        let cache = makeMockCache(tmpDir: dir)
+        let url = "https://example.com/status.mp4"
+
+        #expect(await cache.cacheStatus(for: url) == .missing)
+
+        let downloadedPath = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
+        #expect(await cache.cacheStatus(for: url) == .cached(localPath: downloadedPath))
+
+        try cache.removeAllCachedResources()
+        #expect(await cache.cacheStatus(for: url) == .missing)
+    }
+
     @Test @MainActor func concurrentRequestsShareDownloadAndProgressCallbacks() async throws {
         delayedState = VAPDelayedURLProtocolState()
         let dir = tmpCacheDir()
@@ -266,6 +298,31 @@ struct VAPDiskCacheTests {
         #expect(delayedState.requestCount == 1)
         #expect(firstProgress.last == 1.0)
         #expect(secondProgress.last == 1.0)
+    }
+
+    @Test @MainActor func cacheStatusReportsInflightProgress() async throws {
+        delayedState = VAPDelayedURLProtocolState()
+        let dir = tmpCacheDir()
+        let cache = makeDelayedCache(tmpDir: dir)
+        let url = "https://example.com/inflight.mp4"
+        var progressValues: [Double] = []
+
+        let download = Task {
+            try await cache.resolveLocalPath(for: url) { progress in
+                progressValues.append(progress)
+            }
+        }
+
+        await delayedState.waitUntilStarted()
+        await waitUntil { progressValues == [0.5] }
+
+        #expect(await cache.cacheStatus(for: url) == .downloading(progress: 0.5))
+
+        delayedState.releaseResponse()
+        let localPath = try await download.value
+        await waitUntil { progressValues.last == 1.0 }
+
+        #expect(await cache.cacheStatus(for: url) == .cached(localPath: localPath))
     }
 
     // MARK: - 进度回调
