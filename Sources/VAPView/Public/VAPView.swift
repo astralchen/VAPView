@@ -27,9 +27,10 @@ public final class VAPView: UIView {
     /// Called before playback starts. Return false to cancel playback.
     public var shouldStartPlay: ((VAPPlaybackConfiguration) -> Bool)?
 
-    /// Resource loader used to resolve remote `http(s)://` URLs to local file paths.
+    /// Resource loader used to resolve remote HTTPS URLs to local file paths.
     /// Defaults to `VAPDiskCache.shared`. Replace with a custom implementation to
-    /// control download and caching behaviour.
+    /// control download and caching behaviour. Custom loaders may support other
+    /// schemes, but the default disk cache rejects plain HTTP URLs.
     public var resourceLoader: VAPResourceLoader = VAPDiskCache.shared
 
     // MARK: - Private
@@ -97,19 +98,21 @@ public final class VAPView: UIView {
     /// single download, and each caller receives progress updates.
     ///
     /// - Parameters:
-    ///   - filePath: The local file path or HTTPS URL of the resource. Local paths
+    ///   - source: The local file path or HTTPS URL of the resource. Local paths
     ///     are returned unchanged.
-    ///   - resourceLoader: The object that resolves the resource. The default value
+    ///   - resourceLoader: The object that resolves the source. The default value
     ///     is `VAPDiskCache.shared`.
-    ///   - onProgress: A closure the loader calls with progress values in the range
+    ///   - progressHandler: A closure the loader calls with progress values in the range
     ///     `0...1`.
     /// - Returns: A local file path suitable for playback.
     @discardableResult
-    @concurrent public nonisolated static func prefetch(filePath: String,
-                                                        resourceLoader: VAPResourceLoader = VAPDiskCache.shared,
-                                                        onProgress: (@MainActor @Sendable (Double) -> Void)? = nil) async throws -> String {
-        let progressHandler: @MainActor @Sendable (Double) -> Void = onProgress ?? { _ in }
-        return try await resourceLoader.localPath(for: filePath, onProgress: progressHandler)
+    @concurrent public nonisolated static func prefetch(
+        source: String,
+        using resourceLoader: VAPResourceLoader = VAPDiskCache.shared,
+        progressHandler: (@MainActor @Sendable (Double) -> Void)? = nil
+    ) async throws -> String {
+        let handler: @MainActor @Sendable (Double) -> Void = progressHandler ?? { _ in }
+        return try await resourceLoader.resolveLocalPath(for: source, progressHandler: handler)
     }
 
     /// Play a VAP/HWD animation file.
@@ -124,7 +127,7 @@ public final class VAPView: UIView {
     ///
     /// | Property | Description |
     /// |---|---|
-    /// | `source` | Local file path or `http(s)://` URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. |
+    /// | `source` | Local file path or HTTPS URL. Remote URLs are downloaded via ``VAPDiskCache`` before playback; progress is reported through `.downloading` events. The default loader rejects plain HTTP URLs. |
     /// | `alphaPlacement` | Alpha channel position (`.left`/`.right`/`.top`/`.bottom`). **Only used for HWD path** — ignored when the MP4 `vapc` box contains `rgbFrame`/`aFrame`. Default: `.right`. |
     /// | `backgroundPolicy` | Behavior when the app enters background: `.stop` (default), `.pauseAndResume`, or `.ignore`. |
     /// | `contentMode` | Display scaling: `.scaleToFill` (default), `.aspectFit`, or `.aspectFill`. |
@@ -243,9 +246,9 @@ public final class VAPView: UIView {
             let remoteConfiguration = activeConfiguration
             playTask = Task { @MainActor [weak self] in
                 do {
-                    let localPath = try await loader.localPath(for: remoteConfiguration.source, onProgress: { progress in
+                    let localPath = try await loader.resolveLocalPath(for: remoteConfiguration.source) { progress in
                         wrappedEventHandler?(.downloading(progress: progress))
-                    })
+                    }
                     guard let self, !Task.isCancelled else { return }
                     var localConfiguration = remoteConfiguration
                     localConfiguration.source = localPath

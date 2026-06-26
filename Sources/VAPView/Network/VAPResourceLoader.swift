@@ -4,24 +4,24 @@
 
 import Foundation
 
-/// Resolves a file path or remote URL string to a local readable file path.
-///
-/// - For local paths the implementation should return the path unchanged.
-/// - For remote `http(s)://` URLs the implementation should download the file
-///   to a local cache and return the cached path.
+/// Resolves a local path or remote URL string to a local readable file path.
 ///
 /// The default implementation is `VAPDiskCache.shared`.
 public protocol VAPResourceLoader: AnyObject, Sendable {
-    /// Returns a local file path for the given `filePath`.
+    /// Returns a local file path for the given source.
     ///
     /// - Parameters:
-    ///   - filePath: A local file path or a remote `http(s)://` URL string.
-    ///   - onProgress: Called on the main actor with download progress in `[0, 1]`.
-    ///                 Only invoked for remote URLs that are not yet cached.
+    ///   - source: A local file path or remote `https://` URL string.
+    ///   - progressHandler: Called on the main actor with download progress in `0...1`.
     /// - Returns: An absolute local file path ready for playback.
-    @concurrent func localPath(for filePath: String,
-                               onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String
+    @concurrent func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String
+}
 
-    /// Removes all files from the local cache managed by this loader.
-    func clearCache() throws
+/// Provides cache-management operations for loaders that own local cached files.
+public protocol VAPResourceCacheCleaning: AnyObject {
+    /// Removes all files managed by the cache.
+    func removeAllCachedResources() throws
 }

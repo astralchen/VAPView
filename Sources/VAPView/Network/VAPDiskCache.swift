@@ -12,11 +12,11 @@ private typealias VAPResourceProgressHandler = @MainActor @Sendable (Double) -> 
 /// - Cache directory: `<Caches>/com.vap/resources/`
 /// - Cache key: SHA-256 hex of the URL string + original file extension
 /// - Concurrent requests for the same URL share a single download.
-public final class VAPDiskCache: VAPResourceLoader {
+public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning {
 
     public static let shared = VAPDiskCache()
 
-    private let cacheDir: URL
+    private let cacheDirectory: URL
     private let sessionManager: VAPDownloadSessionManager
     private let inflightActor = InflightActor()
 
@@ -26,69 +26,71 @@ public final class VAPDiskCache: VAPResourceLoader {
 
     init(configuration: URLSessionConfiguration) {
         let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask)[0]
-        self.cacheDir = caches.appendingPathComponent("com.vap/resources", isDirectory: true)
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        self.cacheDirectory = caches.appendingPathComponent("com.vap/resources", isDirectory: true)
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         self.sessionManager = VAPDownloadSessionManager(configuration: configuration)
     }
 
     init(configuration: URLSessionConfiguration, cacheDirectory: URL) {
-        self.cacheDir = cacheDirectory
-        try? FileManager.default.createDirectory(at: cacheDir, withIntermediateDirectories: true)
+        self.cacheDirectory = cacheDirectory
+        try? FileManager.default.createDirectory(at: cacheDirectory, withIntermediateDirectories: true)
         self.sessionManager = VAPDownloadSessionManager(configuration: configuration)
     }
 
     // MARK: - VAPResourceLoader
 
-    @concurrent public func localPath(for filePath: String,
-                                      onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
-        guard filePath.hasPrefix("http://") || filePath.hasPrefix("https://") else {
-            return filePath
+    @concurrent public func resolveLocalPath(
+        for source: String,
+        progressHandler: @escaping @MainActor @Sendable (Double) -> Void
+    ) async throws -> String {
+        guard source.hasPrefix("http://") || source.hasPrefix("https://") else {
+            return source
         }
         // [H4] 拒绝明文 HTTP，防止中间人攻击替换 MP4 载荷
-        guard filePath.hasPrefix("https://") else {
-            throw VAPError.unsupportedURLScheme(filePath)
+        guard source.hasPrefix("https://") else {
+            throw VAPError.unsupportedURLScheme(source)
         }
-        guard let url = URL(string: filePath) else {
-            throw VAPError.fileNotFound(filePath)
+        guard let url = URL(string: source) else {
+            throw VAPError.fileNotFound(source)
         }
-        let cacheKey = cacheFileName(for: filePath, ext: url.pathExtension)
-        let dest = cacheDir.appendingPathComponent(cacheKey)
-        if FileManager.default.fileExists(atPath: dest.path) {
-            return dest.path
+        let cacheKey = cacheFileName(for: source, pathExtension: url.pathExtension)
+        let destination = cacheDirectory.appendingPathComponent(cacheKey)
+        if FileManager.default.fileExists(atPath: destination.path) {
+            return destination.path
         }
-        return try await download(url: url, dest: dest, onProgress: onProgress)
+        return try await download(url: url, destination: destination, progressHandler: progressHandler)
     }
 
-    public func clearCache() throws {
-        let items = try FileManager.default.contentsOfDirectory(atPath: cacheDir.path)
+    public func removeAllCachedResources() throws {
+        let items = try FileManager.default.contentsOfDirectory(atPath: cacheDirectory.path)
         for item in items {
-            try FileManager.default.removeItem(at: cacheDir.appendingPathComponent(item))
+            try FileManager.default.removeItem(at: cacheDirectory.appendingPathComponent(item))
         }
     }
 
     // MARK: - Private
 
-    private func cacheFileName(for urlString: String, ext: String) -> String {
+    private func cacheFileName(for urlString: String, pathExtension: String) -> String {
         let hash = SHA256.hash(data: Data(urlString.utf8))
             .compactMap { String(format: "%02x", $0) }.joined()
-        return ext.isEmpty ? hash : hash + "." + ext
+        return pathExtension.isEmpty ? hash : hash + "." + pathExtension
     }
 
     @concurrent private func download(url: URL,
-                                      dest: URL,
-                                      onProgress: @escaping VAPResourceProgressHandler) async throws -> String {
-        let mgr = sessionManager
-        let (task, isOwner) = await inflightActor.getOrCreate(for: dest.path,
-                                                              onProgress: onProgress) { progressRelay in
-            Task { try await mgr.download(url: url, dest: dest, onProgress: progressRelay) }
+                                      destination: URL,
+                                      progressHandler: @escaping VAPResourceProgressHandler) async throws -> String {
+        let sessionManager = self.sessionManager
+        let (task, ownsEntry) = await inflightActor.getOrCreate(for: destination.path,
+                                                                progressHandler: progressHandler) { progressRelay in
+            Task { try await sessionManager.download(url: url, destination: destination, progressHandler: progressRelay) }
         }
         do {
             let result = try await task.value
-            await onProgress(1.0)
-            if isOwner { await inflightActor.remove(for: dest.path) }
+            await progressHandler(1.0)
+            if ownsEntry { await inflightActor.remove(for: destination.path) }
             return result
         } catch {
-            if isOwner { await inflightActor.remove(for: dest.path) }
+            if ownsEntry { await inflightActor.remove(for: destination.path) }
             throw error
         }
     }
@@ -110,13 +112,13 @@ private actor InflightActor {
     /// The owner of a newly created task is responsible for removing the entry when
     /// the task completes.
     func getOrCreate(for key: String,
-                     onProgress: @escaping VAPResourceProgressHandler,
+                     progressHandler: @escaping VAPResourceProgressHandler,
                      make: (@escaping VAPResourceProgressHandler) -> Task<String, Error>) -> (Task<String, Error>, Bool) {
         let subscriberID = UUID()
         if var existing = entries[key] {
-            existing.progressHandlers[subscriberID] = onProgress
+            existing.progressHandlers[subscriberID] = progressHandler
             if let latestProgress = existing.latestProgress {
-                Task { await onProgress(latestProgress) }
+                Task { await progressHandler(latestProgress) }
             }
             entries[key] = existing
             return (existing.task, false)
@@ -126,7 +128,7 @@ private actor InflightActor {
         }
         let task = make(relay)
         entries[key] = Entry(task: task,
-                             progressHandlers: [subscriberID: onProgress],
+                             progressHandlers: [subscriberID: progressHandler],
                              latestProgress: nil)
         return (task, true)
     }
@@ -156,23 +158,23 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
         self.session = URLSession(configuration: configuration, delegate: self, delegateQueue: nil)
     }
 
-    private var handlers: [Int: DownloadHandler] = [:]
+    private var handlers: [Int: DownloadRequest] = [:]
     private let lock = NSLock()
 
-    struct DownloadHandler {
-        let dest: URL
-        let onProgress: VAPResourceProgressHandler
+    struct DownloadRequest {
+        let destination: URL
+        let progressHandler: VAPResourceProgressHandler
         let continuation: CheckedContinuation<String, Error>
     }
 
     @concurrent func download(url: URL,
-                              dest: URL,
-                              onProgress: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
+                              destination: URL,
+                              progressHandler: @escaping @MainActor @Sendable (Double) -> Void) async throws -> String {
         try await withCheckedThrowingContinuation { cont in
             let task = session.downloadTask(with: url)
             lock.lock()
-            handlers[task.taskIdentifier] = DownloadHandler(dest: dest,
-                                                            onProgress: onProgress,
+            handlers[task.taskIdentifier] = DownloadRequest(destination: destination,
+                                                            progressHandler: progressHandler,
                                                             continuation: cont)
             lock.unlock()
             task.resume()
@@ -190,13 +192,13 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
         lock.unlock()
         guard let handler else { return }
         do {
-            if FileManager.default.fileExists(atPath: handler.dest.path) {
-                try FileManager.default.removeItem(at: handler.dest)
+            if FileManager.default.fileExists(atPath: handler.destination.path) {
+                try FileManager.default.removeItem(at: handler.destination)
             }
-            try FileManager.default.moveItem(at: location, to: handler.dest)
-            let cb = handler.onProgress
-            Task { await cb(1.0) }
-            handler.continuation.resume(returning: handler.dest.path)
+            try FileManager.default.moveItem(at: location, to: handler.destination)
+            let progressHandler = handler.progressHandler
+            Task { await progressHandler(1.0) }
+            handler.continuation.resume(returning: handler.destination.path)
         } catch {
             handler.continuation.resume(throwing: error)
         }
@@ -213,8 +215,8 @@ private final class VAPDownloadSessionManager: NSObject, URLSessionDownloadDeleg
         lock.unlock()
         guard let handler else { return }
         let progress = Double(totalBytesWritten) / Double(totalBytesExpectedToWrite)
-        let cb = handler.onProgress
-        Task { await cb(progress) }
+        let progressHandler = handler.progressHandler
+        Task { await progressHandler(progress) }
     }
 
     func urlSession(_ session: URLSession,

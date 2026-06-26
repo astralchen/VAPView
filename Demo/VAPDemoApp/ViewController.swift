@@ -230,7 +230,7 @@ final class ViewController: UIViewController {
 
     @objc private func clearCacheTapped() {
         do {
-            try VAPDiskCache.shared.clearCache()
+            try VAPDiskCache.shared.removeAllCachedResources()
             setStatus("Cache cleared")
         } catch {
             setStatus("Clear failed: \(error.localizedDescription)")
