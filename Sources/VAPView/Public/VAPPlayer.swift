@@ -120,7 +120,7 @@ public final class VAPPlayer {
         currentConfiguration = configuration
         currentFrameIndex = 0
         self.eventHandler = eventHandler
-        metalView.vapContentMode = configuration.contentMode
+        metalView.renderContentMode = configuration.contentMode
         setupBackgroundObservers(policy: configuration.backgroundPolicy)
         let generation = playbackGeneration
         playbackTask = Task { [weak self] in

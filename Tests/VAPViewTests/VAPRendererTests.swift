@@ -34,14 +34,14 @@ struct VAPRendererTests {
 
     @Test @MainActor func vertexRectScaleToFill() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .scaleToFill
+        view.renderContentMode = .scaleToFill
         let rect = view.vertexRect(videoSize: CGSize(width: 1920, height: 1080))
         #expect(rect == CGRect(x: -1, y: -1, width: 2, height: 2))
     }
 
     @Test @MainActor func vertexRectAspectFitWiderVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .aspectFit
+        view.renderContentMode = .aspectFit
         // 16:9 video in square view: should be letterboxed (height < 2)
         let rect = view.vertexRect(videoSize: CGSize(width: 1920, height: 1080))
         #expect(rect.width == 2.0)
@@ -50,7 +50,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func vertexRectAspectFitTallerVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .aspectFit
+        view.renderContentMode = .aspectFit
         // 9:16 video in square view: should be pillarboxed (width < 2)
         let rect = view.vertexRect(videoSize: CGSize(width: 1080, height: 1920))
         #expect(rect.width < 2.0)
@@ -59,7 +59,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func vertexRectAspectFillWiderVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .aspectFill
+        view.renderContentMode = .aspectFill
         // 16:9 video in square view: width exceeds 2 to fill, height stays 2
         let rect = view.vertexRect(videoSize: CGSize(width: 1920, height: 1080))
         #expect(rect.width > 2.0)
@@ -183,7 +183,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func aspectFitUsesRGBSizeNotFullVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .aspectFit
+        view.renderContentMode = .aspectFit
 
         let fullSize = CGSize(width: 1920, height: 1080)
         let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
@@ -201,7 +201,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func aspectFillUsesRGBSizeNotFullVideo() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .aspectFill
+        view.renderContentMode = .aspectFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
         let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)
@@ -310,7 +310,7 @@ struct VAPRendererTests {
 
     @Test @MainActor func scaleToFillUnaffectedByBug() {
         let view = VAPMetalView(frame: CGRect(x: 0, y: 0, width: 300, height: 300))
-        view.vapContentMode = .scaleToFill
+        view.renderContentMode = .scaleToFill
 
         let fullSize = CGSize(width: 1920, height: 1080)
         let rgbSize = rgbContentSize(alphaPlacement: .right, videoWidth: 1920, videoHeight: 1080)

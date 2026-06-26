@@ -14,10 +14,10 @@ public final class VAPView: UIView {
 
     /// Destroy the player automatically after playback finishes.
     /// Defaults to false — keeps Metal objects alive for efficient reuse (e.g. in lists).
-    public var autoDestroyAfterFinish: Bool = false
+    public var automaticallyDestroysPlayerAfterPlayback: Bool = false
 
     /// Override FPS (0 = use MP4 header value).
-    public var fps: Int = 0
+    public var preferredFramesPerSecond: Int = 0
 
     /// Mutes audio when true.
     public var isMuted: Bool = false {
@@ -25,7 +25,7 @@ public final class VAPView: UIView {
     }
 
     /// Called before playback starts. Return false to cancel playback.
-    public var shouldStartPlay: ((VAPPlaybackConfiguration) -> Bool)?
+    public var shouldStartPlayback: ((VAPPlaybackConfiguration) -> Bool)?
 
     /// Resource loader used to resolve remote HTTPS URLs to local file paths.
     /// Defaults to `VAPDiskCache.shared`. Replace with a custom implementation to
@@ -37,8 +37,7 @@ public final class VAPView: UIView {
 
     private var player: VAPPlayer?
     private var playTask: Task<Void, Never>?
-    private var eventHandler: ((VAPEvent) -> Void)?
-    private var gestureHandlers: [(UIGestureRecognizer, (UIGestureRecognizer) -> Void)] = []
+    private var gestureHandlers: [(gesture: UIGestureRecognizer, handler: (UIGestureRecognizer) -> Void)] = []
 
     // MARK: - Init
 
@@ -54,9 +53,9 @@ public final class VAPView: UIView {
 
     /// Add a tap gesture on the Metal view. The handler fires on each tap.
     /// The gesture persists across repeat cycles and is only removed when `teardown()` is called.
-    public func addVapTapGesture(_ handler: @escaping (UITapGestureRecognizer) -> Void) {
+    public func addTapGesture(_ handler: @escaping (UITapGestureRecognizer) -> Void) {
         let tap = UITapGestureRecognizer()
-        addVapGesture(tap) { gesture in
+        addGesture(tap) { gesture in
             guard let tap = gesture as? UITapGestureRecognizer else { return }
             handler(tap)
         }
@@ -64,29 +63,29 @@ public final class VAPView: UIView {
 
     /// Add any UIGestureRecognizer on the Metal view.
     /// The gesture persists across repeat cycles and is only removed when `teardown()` is called.
-    public func addVapGesture(_ gesture: UIGestureRecognizer,
-                               callback: @escaping (UIGestureRecognizer) -> Void) {
-        gestureHandlers.append((gesture, callback))
-        gesture.addTarget(self, action: #selector(handleVapGesture(_:)))
+    public func addGesture(_ gesture: UIGestureRecognizer,
+                           handler: @escaping (UIGestureRecognizer) -> Void) {
+        gestureHandlers.append((gesture, handler))
+        gesture.addTarget(self, action: #selector(handleGesture(_:)))
         // Attach to metalView if already created, otherwise attached on next play.
         player?.metalView.addGestureRecognizer(gesture)
     }
 
     /// Remove a previously registered gesture and detach it from the Metal view.
-    public func removeVapGesture(_ gesture: UIGestureRecognizer) {
-        gestureHandlers.removeAll { $0.0 === gesture }
-        gesture.removeTarget(self, action: #selector(handleVapGesture(_:)))
+    public func removeGesture(_ gesture: UIGestureRecognizer) {
+        gestureHandlers.removeAll { $0.gesture === gesture }
+        gesture.removeTarget(self, action: #selector(handleGesture(_:)))
         player?.metalView.removeGestureRecognizer(gesture)
     }
 
-    /// VAPView itself does not handle gestures — use addVapTapGesture / addVapGesture.
-    @available(*, unavailable, message: "Use addVapTapGesture or addVapGesture instead.")
+    /// VAPView itself does not handle gestures — use addTapGesture / addGesture.
+    @available(*, unavailable, message: "Use addTapGesture or addGesture(_:handler:) instead.")
     override public func addGestureRecognizer(_ gestureRecognizer: UIGestureRecognizer) {
         super.addGestureRecognizer(gestureRecognizer)
     }
 
-    @objc private func handleVapGesture(_ sender: UIGestureRecognizer) {
-        for (g, cb) in gestureHandlers where g === sender { cb(sender) }
+    @objc private func handleGesture(_ sender: UIGestureRecognizer) {
+        for (gesture, handler) in gestureHandlers where gesture === sender { handler(sender) }
     }
 
     // MARK: - Public API
@@ -210,40 +209,40 @@ public final class VAPView: UIView {
     /// - Parameters:
     ///   - configuration: Full play configuration. See property table above.
     ///   - eventHandler: Optional closure called for each ``VAPEvent``.
-    public func play(_ configuration: VAPPlaybackConfiguration, eventHandler: ((VAPEvent) -> Void)? = nil) {
-        var activeConfiguration = configuration
-        activeConfiguration.preferredFramesPerSecond = fps > 0
-            ? fps
+    public func play(_ configuration: VAPPlaybackConfiguration,
+                     eventHandler: ((VAPEvent) -> Void)? = nil) {
+        var playbackConfiguration = configuration
+        playbackConfiguration.preferredFramesPerSecond = preferredFramesPerSecond > 0
+            ? preferredFramesPerSecond
             : configuration.preferredFramesPerSecond
 
         // shouldStart gate
-        if let gate = shouldStartPlay, !gate(activeConfiguration) { return }
+        if let shouldStartPlayback, !shouldStartPlayback(playbackConfiguration) { return }
 
         // Stop any existing playback but keep player/metalView alive for reuse.
         playTask?.cancel()
         playTask = nil
         player?.stop()
-        self.eventHandler = eventHandler
 
         ensurePlayer()
         guard let p = player else { return }
 
-        // Wrap caller's eventHandler to handle autoDestroyAfterFinish internally.
+        // Wrap caller's eventHandler to handle automatic teardown internally.
         let wrappedEventHandler: ((VAPEvent) -> Void)? = { [weak self] event in
             guard let self else { return }
             eventHandler?(event)
             switch event {
             case .didFinish, .didStop:
-                if self.autoDestroyAfterFinish { self.teardown() }
+                if self.automaticallyDestroysPlayerAfterPlayback { self.teardown() }
             default:
                 break
             }
         }
 
-        let isRemote = activeConfiguration.source.hasPrefix("http://") || activeConfiguration.source.hasPrefix("https://")
+        let isRemote = playbackConfiguration.source.hasPrefix("http://") || playbackConfiguration.source.hasPrefix("https://")
         if isRemote {
             let loader = resourceLoader
-            let remoteConfiguration = activeConfiguration
+            let remoteConfiguration = playbackConfiguration
             playTask = Task { @MainActor [weak self] in
                 do {
                     let localPath = try await loader.resolveLocalPath(for: remoteConfiguration.source) { progress in
@@ -260,13 +259,13 @@ public final class VAPView: UIView {
                 }
             }
         } else {
-            p.play(activeConfiguration, eventHandler: wrappedEventHandler)
+            p.play(playbackConfiguration, eventHandler: wrappedEventHandler)
             p.setMuted(isMuted)
         }
     }
 
     /// Convenience overload accepting individual parameters.
-    public func play(filePath: String,
+    public func play(source: String,
                      alphaPlacement: VAPAlphaPlacement = .right,
                      backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
                      contentMode: VAPContentMode = .scaleToFill,
@@ -277,20 +276,20 @@ public final class VAPView: UIView {
                      playsAudio: Bool = true,
                      loopCount: Int = 1,
                      eventHandler: ((VAPEvent) -> Void)? = nil) {
-        let playbackConfiguration = VAPPlaybackConfiguration(
-            source: filePath,
+        let configuration = VAPPlaybackConfiguration(
+            source: source,
             alphaPlacement: alphaPlacement,
             backgroundPolicy: backgroundPolicy,
             contentMode: contentMode,
             attachmentSources: attachmentSources,
             imageLoader: imageLoader,
             frameBufferCapacity: frameBufferCapacity,
-            preferredFramesPerSecond: fps,
+            preferredFramesPerSecond: preferredFramesPerSecond,
             playsAudio: playsAudio,
             mask: mask,
             loopCount: loopCount
         )
-        play(playbackConfiguration, eventHandler: eventHandler)
+        play(configuration, eventHandler: eventHandler)
     }
 
     public func stop() {
@@ -324,8 +323,8 @@ public final class VAPView: UIView {
         p.metalView.autoresizingMask = [.flexibleWidth, .flexibleHeight]
         addSubview(p.metalView)
         // Attach any pre-registered gestures to the new metalView.
-        for (g, _) in gestureHandlers {
-            p.metalView.addGestureRecognizer(g)
+        for (gesture, _) in gestureHandlers {
+            p.metalView.addGestureRecognizer(gesture)
         }
         player = p
     }
@@ -335,7 +334,7 @@ public final class VAPView: UIView {
         playTask = nil
         // Remove gestures before removing metalView so they can be re-attached later.
         if let mv = player?.metalView {
-            for (g, _) in gestureHandlers { mv.removeGestureRecognizer(g) }
+            for (gesture, _) in gestureHandlers { mv.removeGestureRecognizer(gesture) }
             mv.removeFromSuperview()
         }
         player = nil
