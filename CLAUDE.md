@@ -9,23 +9,30 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 SIMULATOR_UDID=49428834-37D6-4470-BF7F-951C0F3441D4
 
 # Build for iOS Simulator
-xcodebuild -scheme VAPView -destination 'generic/platform=iOS Simulator' build-for-testing
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination 'generic/platform=iOS Simulator' build-for-testing
 
 # Run tests on a specific iOS Simulator
-xcodebuild -scheme VAPView -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" -enableCodeCoverage NO test -skip-testing:VAPViewTests/GiftEffectsFixtureTests
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" -enableCodeCoverage NO test
 
-# Build the standalone demo project
-xcodebuild -project Demo/VAPDemo.xcodeproj -scheme VAPDemo -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" build
+# Run demo UI tests
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemoUITests -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" test
+
+# Build the demo through the shared workspace
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemo -destination "platform=iOS Simulator,id=${SIMULATOR_UDID}" build
 ```
 
-Do not use `swift test` as the primary verification command in this repository. SwiftPM test execution targets macOS in this environment, while the package imports UIKit and is declared for iOS 14+.
+Do not use `swift test` as the primary verification command in this repository. SwiftPM test execution targets macOS in this environment, while the package imports UIKit and is declared for iOS 15+.
 
-The `Demo/` directory is a standalone Xcode project and is not part of the Swift package; open it separately in Xcode or build it with `xcodebuild -project`.
+Open `VAPView.xcworkspace` at the repository root to manage the local Swift package and the demo project together. Use the `VAPViewTests` scheme for all tests, `VAPView` for the framework, and `VAPDemo` for the app. All three schemes run the native `VAPViewTests` target from `Demo/VAPDemo.xcodeproj`. It reuses `Tests/VAPViewTests`, bundles the fixture JSON and project file, and runs without a host app. The package also retains its SwiftPM test target; direct SwiftPM-generated schemes still need to skip `GiftEffectsFixtureTests`, whose SwiftPM path expects the repository working directory. The demo depends on the package at `..`, relative to `Demo/`.
+
+Use Xcode with a Swift 6.3 toolchain (validated with Xcode 26.5). The Swift language mode remains 6 (`SWIFT_VERSION = 6.0`), not 6.3. If `xcode-select` points to Command Line Tools, prefix build commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+UI tests live in `Demo/VAPDemoUITests`, target the `VAPDemo` app, and use the `VAPDemoUITests` shared scheme. The `VAPDemo` scheme includes this UI test target as well as the unit test target. Tests use accessibility identifiers, avoid remote video downloads, and exercise cache clearing on the selected simulator.
 
 ## Package
 
-- **Platform**: iOS 14+ only (no macOS/tvOS targets)
-- **Swift**: tools-version 6.0, strict Swift 6 concurrency (`swiftLanguageMode(.v6)`)
+- **Platform**: iOS 15+ only (no macOS/tvOS targets)
+- **Swift**: tools-version 6.3, strict Swift 6 concurrency (`swiftLanguageMode(.v6)`)
 - **No external dependencies** — links Metal, MetalKit, VideoToolbox, CoreVideo, CoreMedia, AVFoundation
 
 ## VAP Format

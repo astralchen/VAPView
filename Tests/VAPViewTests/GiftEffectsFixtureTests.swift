@@ -25,14 +25,22 @@ final class GiftEffectsFixtureTests: XCTestCase {
     }
 
     private func giftEffectsURL() throws -> URL {
+        #if SWIFT_PACKAGE
         let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
         let url = root.appendingPathComponent("Demo/VAPDemoApp/gift_effects_mp4.json")
         XCTAssertTrue(FileManager.default.fileExists(atPath: url.path))
         return url
+        #else
+        return try XCTUnwrap(Bundle(for: Self.self).url(forResource: "gift_effects_mp4", withExtension: "json"))
+        #endif
     }
 
-    private func demoProjectURL() -> URL {
-        URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
+    private func demoProjectURL() throws -> URL {
+        #if SWIFT_PACKAGE
+        return URL(fileURLWithPath: FileManager.default.currentDirectoryPath)
             .appendingPathComponent("Demo/VAPDemo.xcodeproj/project.pbxproj")
+        #else
+        return try XCTUnwrap(Bundle(for: Self.self).url(forResource: "project", withExtension: "pbxproj"))
+        #endif
     }
 }

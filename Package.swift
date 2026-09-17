@@ -1,4 +1,4 @@
-// swift-tools-version: 6.0
+// swift-tools-version: 6.3
 // Copyright (C) 2020 Tencent. All rights reserved.
 // Licensed under the MIT License.
 
@@ -7,7 +7,7 @@ import PackageDescription
 let package = Package(
     name: "VAPView",
     platforms: [
-        .iOS(.v14)
+        .iOS(.v15)
     ],
     products: [
         .library(

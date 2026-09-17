@@ -10,9 +10,9 @@
 
 | | |
 |---|---|
-| 平台 | iOS 14+ |
-| Swift | Swift 6 |
-| Xcode | 16+ |
+| 平台 | iOS 15+ |
+| Swift | Swift 6.3+ |
+| Xcode | 26.5+ (Swift 6.3) |
 
 ---
 
@@ -33,6 +33,27 @@ targets: [
     )
 ]
 ```
+
+---
+
+## 工作空间开发
+
+打开仓库根目录的 `VAPView.xcworkspace`，统一管理本地 `VAPView` Swift 包与 `VAPDemo` 示例工程。选择 **VAPDemo** 运行示例，选择 **VAPView** 构建框架，选择 **VAPViewTests** 后按 ⌘U 运行单元测试。Demo 和框架 Scheme 也已关联测试 target。
+
+```bash
+open VAPView.xcworkspace
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemo -destination 'generic/platform=iOS Simulator' build
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination 'generic/platform=iOS Simulator' build-for-testing
+# 将 <SIMULATOR_UDID> 替换为 xcrun simctl list devices available 中的可用设备 ID。
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination 'platform=iOS Simulator,id=<SIMULATOR_UDID>' test
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemoUITests -destination 'platform=iOS Simulator,id=<SIMULATOR_UDID>' test
+```
+
+选择 **VAPDemoUITests** 后按 ⌘U 运行 Demo 的 UI 测试；**VAPDemo** Scheme 同时包含单元测试与 UI 测试 target。UI 测试源码位于 `Demo/VAPDemoUITests`，覆盖启动、初始按钮状态和清缓存操作，不依赖远程视频下载。缓存测试会清除所选模拟器中 Demo 的缓存。
+
+Swift 包要求 6.3 工具链，框架与 Demo 均使用 Swift 6 语言模式（`SWIFT_VERSION = 6.0`）。若命令行当前选中 Command Line Tools，请在命令前添加 `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`。
+
+`Demo/VAPDemo.xcodeproj` 中的原生 `VAPViewTests` target 复用 `Tests/VAPViewTests` 的测试源码，并将 Demo JSON 和工程文件打包为测试资源，无需宿主 App 或跳过测试。请使用 iOS 模拟器运行；`swift test` 面向 macOS，无法编译 UIKit。Swift 包仍保留自身的测试 target，供包开发使用。
 
 ---
 

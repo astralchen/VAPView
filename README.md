@@ -10,9 +10,9 @@ A Swift package for playing **VAP (Video Alpha Protocol)** animations on iOS. VA
 
 | | |
 |---|---|
-| Platform | iOS 14+ |
-| Swift | Swift 6 |
-| Xcode | 16+ |
+| Platform | iOS 15+ |
+| Swift | Swift 6.3+ |
+| Xcode | 26.5+ (Swift 6.3) |
 
 ---
 
@@ -33,6 +33,27 @@ targets: [
     )
 ]
 ```
+
+---
+
+## Development workspace
+
+Open `VAPView.xcworkspace` at the repository root. It contains the local `VAPView` package and the `VAPDemo` app. Select **VAPDemo** to run the demo, **VAPView** to build the framework, or **VAPViewTests** to run unit tests with ⌘U. The demo and framework schemes also include the test target.
+
+```bash
+open VAPView.xcworkspace
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemo -destination 'generic/platform=iOS Simulator' build
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination 'generic/platform=iOS Simulator' build-for-testing
+# Replace <SIMULATOR_UDID> with an available device from xcrun simctl list devices available.
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPViewTests -destination 'platform=iOS Simulator,id=<SIMULATOR_UDID>' test
+xcodebuild -workspace VAPView.xcworkspace -scheme VAPDemoUITests -destination 'platform=iOS Simulator,id=<SIMULATOR_UDID>' test
+```
+
+Select **VAPDemoUITests** and press ⌘U to run UI tests against the demo. The **VAPDemo** scheme includes both unit and UI test targets. UI tests live in `Demo/VAPDemoUITests` and cover launch, idle controls, and cache clearing without downloading remote videos. The cache test clears the demo’s cache on the selected simulator.
+
+The package requires Swift tools 6.3; both the framework and demo use Swift 6 language mode (`SWIFT_VERSION = 6.0`). If command-line tools are selected, prefix commands with `DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer`.
+
+The native `VAPViewTests` target in `Demo/VAPDemo.xcodeproj` reuses the sources in `Tests/VAPViewTests` and bundles the demo JSON and project file for fixture checks. It runs without a host app and does not need to skip any tests. Use an iOS Simulator; `swift test` targets macOS and cannot compile UIKit. The Swift package keeps its own test target for package development.
 
 ---
 

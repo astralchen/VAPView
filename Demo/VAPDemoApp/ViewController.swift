@@ -117,6 +117,13 @@ final class ViewController: UIViewController {
 
         configureButtons()
         setupLayout()
+        giftNameLabel.accessibilityIdentifier = "selectedGiftName"
+        statusLabel.accessibilityIdentifier = "playbackStatus"
+        collectionView.accessibilityIdentifier = "giftList"
+        prefetchButton.accessibilityIdentifier = "prefetchButton"
+        pauseResumeButton.accessibilityIdentifier = "pauseResumeButton"
+        stopButton.accessibilityIdentifier = "stopButton"
+        clearCacheButton.accessibilityIdentifier = "clearCacheButton"
         loadGiftEffects()
     }
 
