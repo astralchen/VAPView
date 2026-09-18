@@ -7,19 +7,27 @@
 
 import UIKit
 
+/// 加载并播放带透明通道的 VAP 或 HWD 动画的视图。
+///
+/// 视图管理当前播放及其资源订阅；替换播放或停止时仅取消自身的加载需求。
+/// 其他视图或预下载仍需要同一资源时，共享下载继续执行。
 @MainActor
 public final class VAPView: UIView {
 
     // MARK: - 公开属性
 
-    /// 播放完成后是否自动销毁播放器。
-    /// 默认值为 false；会保留 Metal 对象，方便列表等场景高效复用。
+    /// 一个布尔值，指示自然播放完成或停止事件后是否自动销毁播放器。
+    ///
+    /// 默认值为 `false`。自动清理只作用于该事件所属的播放实例，不会销毁
+    /// 事件回调中新建的播放实例。显式调用 `stop()` 会清理当前播放器。
     public var automaticallyDestroysPlayerAfterPlayback: Bool = false
 
     /// 覆盖播放帧率（0 表示使用 MP4 头信息中的值）。
     public var preferredFramesPerSecond: Int = 0
 
-    /// 为 true 时静音。
+    /// 一个布尔值，指示播放时是否静音。
+    ///
+    /// 默认值为 `false`。修改后立即应用到当前播放器。
     public var isMuted: Bool = false {
         didSet { player?.setMuted(isMuted) }
     }
@@ -36,6 +44,7 @@ public final class VAPView: UIView {
 
     private var player: VAPPlayer?
     private var playTask: Task<Void, Never>?
+    /// 当前播放身份；异步加载和同步事件回调返回后均须核对，防止旧请求影响新播放。
     private var playbackGeneration: Int = 0
     private var gestureHandlers: [(gesture: UIGestureRecognizer, handler: (UIGestureRecognizer) -> Void)] = []
 
@@ -93,19 +102,26 @@ public final class VAPView: UIView {
     /// 异步下载并缓存 VAP 资源。
     ///
     /// 可在创建视图前使用该方法预热磁盘缓存。通过同一个 `VAPDiskCache` 实例
-    /// 并发请求同一个 URL 时会共用一次下载，并且每个调用方都会收到进度更新。
+    /// 并发请求同一个 URL 时会共用一次下载，并且每个有效订阅者都会收到进度更新。
+    ///
+    /// 取消一个调用只解除自己的订阅；最后一个订阅取消时停止底层下载，并等待
+    /// 工作退出及暂存清理。已确定的成功结果不会被迟到取消改写。自定义加载器
+    /// 应遵守 `VAPResourceLoader` 的协作式取消契约。
     ///
     /// - Parameters:
     ///   - source: 资源的本地文件路径或 HTTPS URL。本地路径会原样返回。
     ///   - resourceLoader: 用于解析 source 的对象。默认值为 `VAPDiskCache.shared`。
-    ///   - progressHandler: 加载器回调的进度闭包，取值范围为 `0...1`。
+    ///   - progressHandler: 在主 Actor 执行的可选下载进度回调，取值范围为 `0...1`。
+    ///     下载进度达到 `1` 不代表缓存文件已提交；请等待方法返回。
     /// - Returns: 可用于播放的本地文件路径。
+    /// - Throws: 取消时抛出 `CancellationError`；其他错误由资源加载器原样传递。
     @discardableResult
     @concurrent public nonisolated static func prefetch(
         source: String,
         using resourceLoader: VAPResourceLoader = VAPDiskCache.shared,
         progressHandler: (@MainActor @Sendable (Double) -> Void)? = nil
     ) async throws -> String {
+        try Task.checkCancellation()
         let handler: @MainActor @Sendable (Double) -> Void = progressHandler ?? { _ in }
         return try await resourceLoader.resolveLocalPath(for: source, progressHandler: handler)
     }
@@ -113,6 +129,11 @@ public final class VAPView: UIView {
     /// 查询远程资源当前的缓存/下载状态。
     ///
     /// 默认查询 ``VAPDiskCache/shared``。如果业务替换了资源缓存，也可以传入自定义状态提供者。
+    ///
+    /// - Parameters:
+    ///   - source: 要查询的远程资源 URL 字符串。
+    ///   - statusProvider: 缓存状态提供者。默认值为 `VAPDiskCache.shared`。
+    /// - Returns: 查询时的状态快照；此方法不触发下载。
     @concurrent public nonisolated static func cacheStatus(
         source: String,
         using statusProvider: VAPResourceCacheStatusProviding = VAPDiskCache.shared
@@ -214,7 +235,8 @@ public final class VAPView: UIView {
     ///
     /// - Parameters:
     ///   - configuration: 完整播放配置。参见上方属性表。
-    ///   - eventHandler: 每个 ``VAPEvent`` 触发时调用的可选闭包。
+    ///   - eventHandler: 在主 Actor 同步执行的可选事件闭包。回调中可以停止或替换播放；
+    ///     回调返回后，旧播放的后续通知和清理会重新核对播放身份。
     public func play(_ configuration: VAPPlaybackConfiguration,
                      eventHandler: ((VAPEvent) -> Void)? = nil) {
         var playbackConfiguration = configuration
@@ -239,6 +261,8 @@ public final class VAPView: UIView {
         let wrappedEventHandler: ((VAPEvent) -> Void)? = { [weak self] event in
             guard let self, self.playbackGeneration == generation else { return }
             eventHandler?(event)
+            // 用户回调可能已启动新播放；旧事件只能清理自己所属的播放器。
+            guard self.playbackGeneration == generation else { return }
             switch event {
             case .didFinish, .didStop:
                 if self.automaticallyDestroysPlayerAfterPlayback { self.teardown() }
@@ -276,7 +300,22 @@ public final class VAPView: UIView {
         }
     }
 
-    /// 接收独立参数的便利重载。
+    /// 使用独立参数配置并播放 VAP 或 HWD 动画。
+    ///
+    /// 加载、取消和事件行为与 `play(_:eventHandler:)` 相同。
+    ///
+    /// - Parameters:
+    ///   - source: 本地文件路径或 HTTPS URL 字符串。
+    ///   - alphaPlacement: HWD 文件的透明通道位置。默认值为 `.right`，VAP 文件忽略此值。
+    ///   - backgroundPolicy: 进入后台时的播放策略。默认值为 `.stop`。
+    ///   - contentMode: 动画的缩放方式。默认值为 `.scaleToFill`。
+    ///   - attachmentSources: 按资源标识配置的挂件内容。默认值为空字典。
+    ///   - imageLoader: 远程图片挂件的异步加载器；使用 `.imageURL` 挂件时必须提供。
+    ///   - frameBufferCapacity: 解码帧缓冲数量。默认值为 `3`。
+    ///   - mask: 可选的外部透明蒙版，仅用于 VAP 渲染。默认值为 `nil`。
+    ///   - playsAudio: 是否播放文件中的音轨。默认值为 `true`。
+    ///   - loopCount: 播放次数。默认值为 `1`；`0` 表示无限循环。
+    ///   - eventHandler: 在主 Actor 同步执行的可选事件闭包，默认值为 `nil`。
     public func play(source: String,
                      alphaPlacement: VAPAlphaPlacement = .right,
                      backgroundPolicy: VAPBackgroundPlaybackPolicy = .stop,
@@ -304,6 +343,10 @@ public final class VAPView: UIView {
         play(configuration, eventHandler: eventHandler)
     }
 
+    /// 停止当前播放，并请求取消该播放持有的资源加载。
+    ///
+    /// 此方法不等待底层下载清理；共享资源的其他订阅不受影响。停止事件的
+    /// 回调中若启动了新播放，旧调用不会清理新播放器。
     public func stop() {
         let generationBeforeStop = playbackGeneration
         playTask?.cancel()
@@ -314,10 +357,12 @@ public final class VAPView: UIView {
         teardown()
     }
 
+    /// 暂停当前播放器。
     public func pause() {
         player?.pause()
     }
 
+    /// 恢复当前播放器的播放。
     public func resume() {
         player?.resume()
     }

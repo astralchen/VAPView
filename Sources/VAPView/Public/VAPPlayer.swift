@@ -36,8 +36,8 @@ public struct VAPPlaybackConfiguration: Sendable {
     /// 循环由播放器内部处理；循环之间不会销毁 Metal/纹理对象。
     ///
     /// - Important: 当 `loopCount == 0`（无限循环）时，播放不会发出 `.didFinish`。
-    ///   必须显式调用 `stop()` 或 `pause()` 结束播放，否则内部 Task 会持续运行，
-    ///   并一直持有相关资源（Metal 纹理、解码器、音频播放器），直到 `VAPPlayer` 释放。
+    ///   必须显式调用 `stop()` 结束播放；`pause()` 会保留播放任务和解码状态，
+    ///   相关资源（Metal 纹理、解码器、音频播放器）会保留到停止或播放完成。
     public var loopCount: Int
 
     public init(source: String,
@@ -94,6 +94,9 @@ public final class VAPPlayer {
     private let metalDevice: MTLDevice?
     private var eventHandler: ((VAPEvent) -> Void)?
     private var playbackGeneration: Int = 0
+    private var isPaused = false
+    private var isAudioPlaybackActive = false
+    private var pauseContinuation: CheckedContinuation<Void, Never>?
 
     // MARK: - 初始化
 
@@ -121,7 +124,7 @@ public final class VAPPlayer {
         installBackgroundObservers(for: configuration.backgroundPolicy)
         let generation = playbackGeneration
         playbackTask = Task { [weak self] in
-            await self?.runPlayback(configuration: configuration, startFrame: 0, generation: generation)
+            await self?.runPlayback(configuration: configuration, generation: generation)
         }
     }
 
@@ -141,6 +144,8 @@ public final class VAPPlayer {
         playbackGeneration &+= 1
         playbackTask?.cancel()
         playbackTask = nil
+        isPaused = false
+        releasePauseWaiter()
         stopAudio()
         removeLifecycleObservers()
         currentConfiguration = nil
@@ -172,6 +177,8 @@ public final class VAPPlayer {
         let handler = eventHandler
 
         playbackTask = nil
+        isPaused = false
+        releasePauseWaiter()
         stopAudio()
         removeLifecycleObservers()
         currentConfiguration = nil
@@ -181,19 +188,37 @@ public final class VAPPlayer {
         deliverEvent(event, to: handler)
     }
 
+    /// 保留解码会话、参考帧、音频位置和循环进度，仅暂停播放推进。
     public func pause() {
-        playbackTask?.cancel()
-        playbackTask = nil
+        guard playbackTask != nil, !isPaused else { return }
+        isPaused = true
         audioPlayer?.pause()
     }
 
+    /// 唤醒同一个播放任务；重复调用不会创建新任务。
     public func resume() {
-        guard let configuration = currentConfiguration else { return }
-        audioPlayer?.play()
-        let startFrame = currentFrameIndex
-        let generation = playbackGeneration
-        playbackTask = Task { [weak self] in
-            await self?.runPlayback(configuration: configuration, startFrame: startFrame, generation: generation)
+        guard playbackTask != nil, isPaused else { return }
+        isPaused = false
+        releasePauseWaiter()
+        if isAudioPlaybackActive { audioPlayer?.play() }
+    }
+
+    private func releasePauseWaiter() {
+        let continuation = pauseContinuation
+        pauseContinuation = nil
+        continuation?.resume()
+    }
+
+    private func checkPlayback(generation: Int) throws {
+        try Task.checkCancellation()
+        guard generation == playbackGeneration else { throw CancellationError() }
+    }
+
+    private func waitWhilePaused(generation: Int) async throws {
+        try checkPlayback(generation: generation)
+        while isPaused {
+            await withCheckedContinuation { pauseContinuation = $0 }
+            try checkPlayback(generation: generation)
         }
     }
 
@@ -203,13 +228,16 @@ public final class VAPPlayer {
 
     // MARK: - 播放循环
 
-    private func runPlayback(configuration: VAPPlaybackConfiguration, startFrame: Int = 0, generation: Int) async {
+    private func runPlayback(configuration: VAPPlaybackConfiguration, generation: Int) async {
+        var activeDecoder: VAPVideoDecoder?
         do {
+            try await waitWhilePaused(generation: generation)
             playerLog.debug("runPlayback start source=\(Self.logSourceDescription(configuration.source))")
             // 1. 在后台线程解析 MP4。
             let info: VAPMP4Info = try await Task.detached(priority: .userInitiated) {
                 try VAPMP4Parser.parse(localFilePath: configuration.source)
             }.value
+            try await waitWhilePaused(generation: generation)
             playerLog.debug("parsed: frames=\(info.frameCount) fps=\(info.fps) size=\(info.width)x\(info.height) hasAudio=\(info.hasAudioTrack) vapc=\(info.vapcJSON != nil)")
             playerLog.debug("configuration: alphaPlacement=\(configuration.alphaPlacement.rawValue) contentMode=\(configuration.contentMode) loopCount=\(configuration.loopCount)")
 
@@ -243,6 +271,7 @@ public final class VAPPlayer {
                     let configManager = VAPConfigManager(device: attachmentDevice, imageLoader: attachmentImageLoader)
                     return try await configManager.load(vapcJSON: jsonData, sources: attachmentSources)
                 }.value
+                try await waitWhilePaused(generation: generation)
                 playerLog.debug("attachmentResources loaded")
             }
 
@@ -259,7 +288,9 @@ public final class VAPPlayer {
             let reorderBufferDepth = Self.requiredBufferDepth(for: info.videoSamples)
             let frameBufferCapacity = max(max(1, configuration.frameBufferCapacity), reorderBufferDepth)
             let decoder     = VAPVideoDecoder(info: info, bufferCapacity: frameBufferCapacity)
+            activeDecoder = decoder
             try await decoder.prepare()
+            try await waitWhilePaused(generation: generation)
             playerLog.debug("decoder prepared frameBufferCapacity=\(frameBufferCapacity) totalFrames=\(info.frameCount)")
 
             let fps = configuration.preferredFramesPerSecond > 0
@@ -283,17 +314,14 @@ public final class VAPPlayer {
                 // 第一轮之后的周期需要重置解码器。
                 if loopIndex > 0 {
                     try await decoder.reset()
+                    try await waitWhilePaused(generation: generation)
                     // 将音频 seek 回起点。
                     audioPlayer?.currentTime = 0
                 }
 
-                let cycleStartFrame = loopIndex == 0 ? startFrame : 0
-                let initialDecodeEndFrame = min(cycleStartFrame + frameBufferCapacity, totalFrames)
-                for i in cycleStartFrame..<initialDecodeEndFrame {
-                    guard !Task.isCancelled else {
-                        await decoder.invalidate()
-                        return
-                    }
+                let initialDecodeEndFrame = min(frameBufferCapacity, totalFrames)
+                for i in 0..<initialDecodeEndFrame {
+                    try await waitWhilePaused(generation: generation)
                     try await decoder.decodeFrame(at: i)
                 }
                 let decodeProducerTask = Self.startDecodeProducer(decoder: decoder,
@@ -301,21 +329,17 @@ public final class VAPPlayer {
                                                                   totalFrames: totalFrames)
 
                 do {
+                    try await waitWhilePaused(generation: generation)
+                    isAudioPlaybackActive = true
                     audioPlayer?.play()
                     playerLog.debug("didStart loop=\(loopIndex)")
                     emitEvent(.didStart, generation: generation)
 
-                    var frameIndex = cycleStartFrame
+                    var frameIndex = 0
 
                     // 内层渲染循环。
                     while frameIndex < totalFrames {
-                        if Task.isCancelled {
-                            decodeProducerTask.cancel()
-                            await decodeProducerTask.value
-                            stopAudio()
-                            await decoder.invalidate()
-                            return
-                        }
+                        try await waitWhilePaused(generation: generation)
 
                         let frameStart = CACurrentMediaTime()
 
@@ -324,10 +348,13 @@ public final class VAPPlayer {
                         var decodedFrame: VAPDecodedFrame?
                         let maxRetries = max(10, Int(frameDuration / 0.002))
                         for _ in 0..<maxRetries {
+                            try await waitWhilePaused(generation: generation)
                             decodedFrame = await decoder.popFrame(at: frameIndex)
                             if decodedFrame != nil { break }
                             try await Task.sleep(nanoseconds: 2_000_000)
                         }
+                        // popFrame 跨 actor 返回期间可能收到暂停或替换；持有该帧等待恢复。
+                        try await waitWhilePaused(generation: generation)
                         guard let frame = decodedFrame else {
                             // 解码器停顿超过一帧预算；跳帧以维持节奏。
                             playerLog.debug("frame \(frameIndex) stalled; skipping")
@@ -351,10 +378,10 @@ public final class VAPPlayer {
                                                       frameIndex: frame.frameIndex)
                         }
 
-                        emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
-
                         frameIndex = frame.frameIndex + 1
                         currentFrameIndex = frameIndex
+                        emitEvent(.didPlayFrame(index: frame.frameIndex), generation: generation)
+                        try checkPlayback(generation: generation)
 
                         // 帧节奏控制。
                         let elapsed = CACurrentMediaTime() - frameStart
@@ -368,12 +395,12 @@ public final class VAPPlayer {
                 } catch {
                     decodeProducerTask.cancel()
                     await decodeProducerTask.value
-                    stopAudio()
-                    await decoder.invalidate()
                     throw error
                 }
 
-                stopAudio()
+                try await waitWhilePaused(generation: generation)
+                isAudioPlaybackActive = false
+                audioPlayer?.pause()
 
                 loopIndex += 1
                 let isLastCycle = loopCount != 0 && loopIndex >= loopCount
@@ -388,15 +415,20 @@ public final class VAPPlayer {
             } while loopCount == 0 || loopIndex < loopCount
 
             await decoder.invalidate()
+            activeDecoder = nil
+            try checkPlayback(generation: generation)
             if didFinishPlayback {
                 completePlayback(with: .didFinish(totalFrames: totalFrames), generation: generation)
             }
 
         } catch let error as VAPError {
+            await activeDecoder?.invalidate()
+            guard !Task.isCancelled, generation == playbackGeneration else { return }
             playerLog.error("VAPError: \(Self.logDescription(for: error))")
             completePlayback(with: .didFail(error), generation: generation)
         } catch {
-            if !Task.isCancelled {
+            await activeDecoder?.invalidate()
+            if !Task.isCancelled, generation == playbackGeneration {
                 playerLog.error("Unknown error: \(Self.logDescription(for: error))")
                 completePlayback(with: .didFail(.unknown(error.localizedDescription)), generation: generation)
             }
@@ -499,6 +531,7 @@ public final class VAPPlayer {
     }
 
     private func stopAudio() {
+        isAudioPlaybackActive = false
         audioPlayer?.stop()
         audioPlayer = nil
     }

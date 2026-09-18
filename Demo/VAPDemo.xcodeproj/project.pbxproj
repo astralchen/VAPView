@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		BBCC00000000000000000001 /* project.pbxproj in Resources */ = {isa = PBXBuildFile; fileRef = BBCC00000000000000000002 /* project.pbxproj */; };
 		26E09F68767D8AECB74999AC /* gift_effects_mp4.json in Resources */ = {isa = PBXBuildFile; fileRef = AA000016000000000000001 /* gift_effects_mp4.json */; };
 		332D765E2F7811B8003B9D8F /* VAPView in Frameworks */ = {isa = PBXBuildFile; productRef = 332D765D2F7811B8003B9D8F /* VAPView */; };
 		387FE5A510230776F89A8526 /* VAPDemoUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 610E8EBD2559DB9DF5C7EDCD /* VAPDemoUITests.swift */; };
@@ -15,6 +16,21 @@
 		AA000002000000000000001 /* SceneDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000012000000000000001 /* SceneDelegate.swift */; };
 		AA000003000000000000001 /* ViewController.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000013000000000000001 /* ViewController.swift */; };
 		AA000004000000000000001 /* gift_effects_mp4.json in Resources */ = {isa = PBXBuildFile; fileRef = AA000016000000000000001 /* gift_effects_mp4.json */; };
+		BBAA00000000000000000001 = {isa = PBXBuildFile; fileRef = AA000013000000000000001 /* ViewController.swift */; };
+		BBAA00000000000000000002 = {isa = PBXBuildFile; fileRef = BBAA00000000000000000003 /* PlaybackStateTests.swift */; };
+		6A8F8EC0BA576773E9097D5A /* GiftEffectsFixtureTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C781FE63EF6D2BCC5A76FBAF /* GiftEffectsFixtureTests.swift */; };
+		7C42538170620D1301A2A907 /* VAPCancellationTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2D808873AB1DC9789BEC7CBE /* VAPCancellationTests.swift */; };
+		D08FA71BCC365793287606A8 /* VAPConfigModelTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 96533031ECBEE1777D2BB20B /* VAPConfigModelTests.swift */; };
+		EBA0AFBAE1B668AD6E602691 /* VAPDiskCacheTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 86FE81D2558A2FD0EB33A2A3 /* VAPDiskCacheTests.swift */; };
+		23F8598401FAECCA3E108A72 /* VAPEventReentrancyTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = BE07F2C5D89BE4FC65790CC9 /* VAPEventReentrancyTests.swift */; };
+		B9009C781F44EFCD85F53307 /* VAPFrameBufferTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CC9B0CF11414184FEDD7C780 /* VAPFrameBufferTests.swift */; };
+		8F06205EC22896F6B7A6BC07 /* VAPLoggerTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 27D3111288B12740488B6AF9 /* VAPLoggerTests.swift */; };
+		5B71B56134D05FEDFFE361F3 /* VAPMP4ParserTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 070BD06BCDDBFD39094D23DD /* VAPMP4ParserTests.swift */; };
+		F47709AD2973DDBBE1CC9801 /* VAPPlayerEventTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = AF34C03C49DBDA0E211D8D9D /* VAPPlayerEventTests.swift */; };
+		FEADC223AA414244F3B1AD27 /* VAPRendererTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 30CFB73884452C95ABCDF36C /* VAPRendererTests.swift */; };
+		931138A6CEE6FAF866BB7F72 /* VAPTypesTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 903D7A67FBC334B25BE24224 /* VAPTypesTests.swift */; };
+		3183251A0C366B714B9B3A6F /* VAPViewAPITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2ABF76EB499A3CDC2178CD06 /* VAPViewAPITests.swift */; };
+		EFC12AB20F80B898289632B4 /* VAPViewPrefetchTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = CEC79AB27B7FFBED5AE5F83A /* VAPViewPrefetchTests.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -28,6 +44,7 @@
 /* End PBXContainerItemProxy section */
 
 /* Begin PBXFileReference section */
+		BBCC00000000000000000002 /* project.pbxproj */ = {isa = PBXFileReference; lastKnownFileType = text; path = VAPDemo.xcodeproj/project.pbxproj; sourceTree = SOURCE_ROOT; };
 		19ED8322EEF930BB2C885303 /* VAPViewTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VAPViewTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		610E8EBD2559DB9DF5C7EDCD /* VAPDemoUITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPDemoUITests.swift; sourceTree = "<group>"; };
 		AA000010000000000000001 /* VAPDemo.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = VAPDemo.app; sourceTree = BUILT_PRODUCTS_DIR; };
@@ -38,6 +55,20 @@
 		AA000015000000000000001 /* VAPView */ = {isa = PBXFileReference; lastKnownFileType = wrapper; name = VAPView; path = ..; sourceTree = "<group>"; };
 		AA000016000000000000001 /* gift_effects_mp4.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = gift_effects_mp4.json; sourceTree = "<group>"; };
 		C3C36D2A19652BA1CEF89D5A /* VAPDemoUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = VAPDemoUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		BBAA00000000000000000003 /* PlaybackStateTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPDemoTests/PlaybackStateTests.swift; sourceTree = SOURCE_ROOT; };
+		C781FE63EF6D2BCC5A76FBAF /* GiftEffectsFixtureTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GiftEffectsFixtureTests.swift; sourceTree = "<group>"; };
+		2D808873AB1DC9789BEC7CBE /* VAPCancellationTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPCancellationTests.swift; sourceTree = "<group>"; };
+		96533031ECBEE1777D2BB20B /* VAPConfigModelTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPConfigModelTests.swift; sourceTree = "<group>"; };
+		86FE81D2558A2FD0EB33A2A3 /* VAPDiskCacheTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPDiskCacheTests.swift; sourceTree = "<group>"; };
+		BE07F2C5D89BE4FC65790CC9 /* VAPEventReentrancyTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPEventReentrancyTests.swift; sourceTree = "<group>"; };
+		CC9B0CF11414184FEDD7C780 /* VAPFrameBufferTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPFrameBufferTests.swift; sourceTree = "<group>"; };
+		27D3111288B12740488B6AF9 /* VAPLoggerTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPLoggerTests.swift; sourceTree = "<group>"; };
+		070BD06BCDDBFD39094D23DD /* VAPMP4ParserTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPMP4ParserTests.swift; sourceTree = "<group>"; };
+		AF34C03C49DBDA0E211D8D9D /* VAPPlayerEventTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPPlayerEventTests.swift; sourceTree = "<group>"; };
+		30CFB73884452C95ABCDF36C /* VAPRendererTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPRendererTests.swift; sourceTree = "<group>"; };
+		903D7A67FBC334B25BE24224 /* VAPTypesTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPTypesTests.swift; sourceTree = "<group>"; };
+		2ABF76EB499A3CDC2178CD06 /* VAPViewAPITests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPViewAPITests.swift; sourceTree = "<group>"; };
+		CEC79AB27B7FFBED5AE5F83A /* VAPViewPrefetchTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = VAPViewPrefetchTests.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -108,12 +139,35 @@
 		AA000033000000000000001 = {
 			isa = PBXGroup;
 			children = (
+				BBCC00000000000000000002 /* project.pbxproj */,
+				99CD7EEC49887D5DFDF21748 /* VAPViewTests */,
+				BBAA00000000000000000003 /* PlaybackStateTests.swift */,
 				AA000030000000000000001 /* VAPDemoApp */,
 				161DFB546111576B6AC71CD0 /* VAPDemoUITests */,
 				AA000031000000000000001 /* Products */,
 				AA000032000000000000001 /* Packages */,
 			);
 			sourceTree = "<group>";
+		};
+		99CD7EEC49887D5DFDF21748 /* VAPViewTests */ = {
+			isa = PBXGroup;
+			children = (
+				C781FE63EF6D2BCC5A76FBAF /* GiftEffectsFixtureTests.swift */,
+				2D808873AB1DC9789BEC7CBE /* VAPCancellationTests.swift */,
+				96533031ECBEE1777D2BB20B /* VAPConfigModelTests.swift */,
+				86FE81D2558A2FD0EB33A2A3 /* VAPDiskCacheTests.swift */,
+				BE07F2C5D89BE4FC65790CC9 /* VAPEventReentrancyTests.swift */,
+				CC9B0CF11414184FEDD7C780 /* VAPFrameBufferTests.swift */,
+				27D3111288B12740488B6AF9 /* VAPLoggerTests.swift */,
+				070BD06BCDDBFD39094D23DD /* VAPMP4ParserTests.swift */,
+				AF34C03C49DBDA0E211D8D9D /* VAPPlayerEventTests.swift */,
+				30CFB73884452C95ABCDF36C /* VAPRendererTests.swift */,
+				903D7A67FBC334B25BE24224 /* VAPTypesTests.swift */,
+				2ABF76EB499A3CDC2178CD06 /* VAPViewAPITests.swift */,
+				CEC79AB27B7FFBED5AE5F83A /* VAPViewPrefetchTests.swift */,
+			);
+			path = ../Tests/VAPViewTests;
+			sourceTree = SOURCE_ROOT;
 		};
 /* End PBXGroup section */
 
@@ -231,6 +285,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				26E09F68767D8AECB74999AC /* gift_effects_mp4.json in Resources */,
+				BBCC00000000000000000001 /* project.pbxproj in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -249,6 +304,21 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				BBAA00000000000000000001,
+				BBAA00000000000000000002,
+				6A8F8EC0BA576773E9097D5A /* GiftEffectsFixtureTests.swift in Sources */,
+				7C42538170620D1301A2A907 /* VAPCancellationTests.swift in Sources */,
+				D08FA71BCC365793287606A8 /* VAPConfigModelTests.swift in Sources */,
+				EBA0AFBAE1B668AD6E602691 /* VAPDiskCacheTests.swift in Sources */,
+				23F8598401FAECCA3E108A72 /* VAPEventReentrancyTests.swift in Sources */,
+				B9009C781F44EFCD85F53307 /* VAPFrameBufferTests.swift in Sources */,
+				8F06205EC22896F6B7A6BC07 /* VAPLoggerTests.swift in Sources */,
+				5B71B56134D05FEDFFE361F3 /* VAPMP4ParserTests.swift in Sources */,
+				F47709AD2973DDBBE1CC9801 /* VAPPlayerEventTests.swift in Sources */,
+				FEADC223AA414244F3B1AD27 /* VAPRendererTests.swift in Sources */,
+				931138A6CEE6FAF866BB7F72 /* VAPTypesTests.swift in Sources */,
+				3183251A0C366B714B9B3A6F /* VAPViewAPITests.swift in Sources */,
+				EFC12AB20F80B898289632B4 /* VAPViewPrefetchTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

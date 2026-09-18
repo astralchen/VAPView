@@ -279,3 +279,16 @@ vapView.resourceLoader = CustomResourceLoader()
 ## 许可证
 
 MIT License. Copyright (C) 2026 astralchen.
+
+### 取消预下载与共享加载
+
+取消调用 `prefetch` 的 Swift `Task` 即可解除该调用的资源需求；不需要下载句柄或按 URL 取消接口。默认 `VAPDiskCache` 为同 URL 的每个调用维护独立订阅：还有其他预下载或播放订阅时，被取消的调用及时抛出 `CancellationError`，其他调用继续。最后一个订阅取消时，会调用底层 `URLSessionDownloadTask.cancel()`，等待下载退出并清理暂存文件后再返回取消结果。同 URL 的新调用会等待旧实例清理完成，再创建新实例。
+
+```swift
+let task = Task { try await VAPView.prefetch(source: url.absoluteString) }
+task.cancel()
+do { _ = try await task.value }
+catch is CancellationError { /* 此次需求已释放 */ }
+```
+
+`VAPView.stop()` 和替换播放只释放该视图自己的加载订阅。取消生效后不会开始新的进度回调；已经进入执行的回调不强行中断。成功与取消以订阅者首先确定的终态为准。完整缓存文件提交后可复用；取消或失败的暂存文件不会作为缓存暴露。预取消也适用于本地路径和缓存命中。自定义 `VAPResourceLoader` 必须自行实现协作式取消；框架不能强制终止自定义加载器。

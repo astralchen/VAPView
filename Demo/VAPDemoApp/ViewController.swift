@@ -3,7 +3,7 @@ import VAPView
 
 final class ViewController: UIViewController {
 
-    private struct GiftEffect: Decodable, Hashable {
+    struct GiftEffect: Decodable, Hashable {
         let name: String
         let url: String
     }
@@ -26,6 +26,11 @@ final class ViewController: UIViewController {
     private let defaultAlphaPlacement: VAPAlphaPlacement = .right
     private var prefetchTask: Task<Void, Never>?
     private var prefetchingSource: String?
+    /// 每次预下载独立的请求身份；同一 URL 再次提交也不能接收旧任务的完成通知。
+    private var prefetchID: UUID?
+    /// 当前播放请求的身份和资源来源，用于隔离替换与停止后的迟到事件。
+    private var playbackID: UUID?
+    private var playbackSource: String?
     private var downloadStates: [String: GiftDownloadState] = [:]
     private var isPrefetching = false
     private var isPlaybackRunning = false
@@ -107,6 +112,30 @@ final class ViewController: UIViewController {
     private let stopButton = UIButton(type: .system)
     private let clearCacheButton = UIButton(type: .system)
 
+    private let giftEffectsLoader: @MainActor () throws -> [GiftEffect]
+
+    /// 创建礼物演示页，并指定礼物目录的加载方式。
+    ///
+    /// - Parameter giftEffectsLoader: 默认读取应用中的目录；测试可提供独立资源。
+    init(giftEffectsLoader: @escaping @MainActor () throws -> [GiftEffect] = ViewController.loadBundledGiftEffects) {
+        self.giftEffectsLoader = giftEffectsLoader
+        super.init(nibName: nil, bundle: nil)
+    }
+
+    required init?(coder: NSCoder) {
+        giftEffectsLoader = Self.loadBundledGiftEffects
+        super.init(coder: coder)
+    }
+
+    private static func loadBundledGiftEffects() throws -> [GiftEffect] {
+        guard let url = Bundle.main.url(forResource: "gift_effects_mp4", withExtension: "json") else {
+            throw CocoaError(.fileNoSuchFile)
+        }
+        return try JSONDecoder().decode([GiftEffect].self, from: Data(contentsOf: url))
+    }
+
+    deinit { prefetchTask?.cancel() }
+
     // MARK: - 生命周期
 
     override func viewDidLoad() {
@@ -125,6 +154,13 @@ final class ViewController: UIViewController {
         stopButton.accessibilityIdentifier = "stopButton"
         clearCacheButton.accessibilityIdentifier = "clearCacheButton"
         loadGiftEffects()
+    }
+
+    override func viewDidDisappear(_ animated: Bool) {
+        super.viewDidDisappear(animated)
+        cancelPrefetch()
+        stopPlayback()
+        setStatus("Stopped - 点击礼物重新播放")
     }
 
     override func viewDidLayoutSubviews() {
@@ -210,17 +246,7 @@ final class ViewController: UIViewController {
 
     private func loadGiftEffects() {
         do {
-            guard let url = Bundle.main.url(forResource: "gift_effects_mp4", withExtension: "json") else {
-                giftEffects = []
-                selectedGiftIndex = nil
-                collectionView.reloadData()
-                giftNameLabel.text = "No gift list"
-                setStatus("gift_effects_mp4.json not found")
-                return
-            }
-
-            let data = try Data(contentsOf: url)
-            giftEffects = try JSONDecoder().decode([GiftEffect].self, from: data)
+            giftEffects = try giftEffectsLoader()
             selectedGiftIndex = giftEffects.isEmpty ? nil : 0
             restoreCachedDownloadStates()
             collectionView.reloadData()
@@ -249,56 +275,96 @@ final class ViewController: UIViewController {
             return
         }
 
-        prefetchTask?.cancel()
+        cancelPrefetch()
 
         let source = selectedGift.url
         let giftName = selectedGift.name
+        let id = UUID()
+        let loader = vapView.resourceLoader
+        prefetchID = id
         isPrefetching = true
         prefetchingSource = source
         progressBar.isHidden = false
         progressBar.progress = 0
-        updateControlButtonStates()
         setDownloadState(.downloading(0), forSource: source)
         setStatus("Prefetching - \(giftName)")
 
+        // 等待资源期间不强持有页面；页面销毁时仍能取消自己持有的加载需求。
         prefetchTask = Task { @MainActor [weak self] in
-            guard let self else { return }
             do {
-                _ = try await VAPView.prefetch(source: source, using: vapView.resourceLoader) { [weak self] progress in
-                    guard let self, self.prefetchingSource == source else { return }
+                _ = try await VAPView.prefetch(source: source, using: loader) { [weak self] progress in
+                    guard let self, self.prefetchID == id else { return }
+                    self.setDownloadState(.downloading(progress), forSource: source)
+                    guard self.selectedGift?.url == source, !self.isPlaybackRunning else { return }
                     self.progressBar.isHidden = false
                     self.progressBar.setProgress(Float(progress), animated: true)
-                    self.setDownloadState(.downloading(progress), forSource: source)
                     self.setStatus(String(format: "Prefetching %.0f%% - %@", progress * 100, giftName))
                 }
-                guard !Task.isCancelled, prefetchingSource == source else { return }
-                isPrefetching = false
-                prefetchingSource = nil
-                progressBar.isHidden = true
-                setDownloadState(.cached, forSource: source)
-                setStatus("Prefetched - \(giftName)")
-                updateControlButtonStates()
+                guard let self, !Task.isCancelled, self.prefetchID == id else { return }
+                self.completePrefetch(source: source, state: .cached, message: "Prefetched - \(giftName)")
             } catch is CancellationError {
-                guard prefetchingSource == source else { return }
-                isPrefetching = false
-                prefetchingSource = nil
-                progressBar.isHidden = true
-                setDownloadState(.idle, forSource: source)
-                updateControlButtonStates()
+                guard let self, self.prefetchID == id else { return }
+                self.completePrefetch(source: source, state: .idle, message: "Prefetch cancelled - \(giftName)")
             } catch {
-                guard prefetchingSource == source else { return }
-                isPrefetching = false
-                prefetchingSource = nil
-                progressBar.isHidden = true
-                setDownloadState(.failed, forSource: source)
-                setStatus("Prefetch failed: \(error.localizedDescription)")
-                updateControlButtonStates()
+                guard let self, self.prefetchID == id else { return }
+                self.completePrefetch(source: source, state: .failed, message: "Prefetch failed: \(error.localizedDescription)")
             }
         }
     }
 
+    /// 结束当前预下载的界面状态，不覆盖仍在播放的礼物状态。
+    private func completePrefetch(source: String, state: GiftDownloadState, message: String) {
+        prefetchID = nil
+        prefetchTask = nil
+        prefetchingSource = nil
+        isPrefetching = false
+        if playbackSource != source { setDownloadState(state, forSource: source) }
+        if selectedGift?.url == source, !isPlaybackRunning {
+            progressBar.isHidden = true
+            setStatus(message)
+        }
+        updateControlButtonStates()
+    }
+
+    /// 撤销预下载身份后再取消句柄，防止取消完成回调清理新请求。
+    private func cancelPrefetch() {
+        let source = prefetchingSource
+        prefetchID = nil
+        prefetchingSource = nil
+        isPrefetching = false
+        let task = prefetchTask
+        prefetchTask = nil
+        task?.cancel()
+        if let source, playbackSource != source { restoreDownloadState(for: source) }
+        if !isPlaybackRunning { progressBar.isHidden = true }
+        updateControlButtonStates()
+    }
+
+    /// 清理没有有效加载需求的下载标记，同时保留可复用的缓存状态。
+    private func restoreDownloadState(for source: String) {
+        guard case .downloading = downloadState(for: source) else { return }
+        let cached = VAPDiskCache.shared.cachedLocalPath(for: source) != nil
+        setDownloadState(cached ? .cached : .idle, forSource: source)
+    }
+
+    /// 停止当前播放，并同步恢复与该请求关联的按钮和下载状态。
+    private func stopPlayback() {
+        let source = playbackSource
+        // stop() 可同步发送事件；先使旧身份失效，旧事件便不能重入更新界面。
+        playbackID = nil
+        playbackSource = nil
+        vapView.stop()
+        isPlaybackRunning = false
+        isPlaybackStarted = false
+        isPlaybackPaused = false
+        progressBar.isHidden = true
+        progressBar.progress = 0
+        if let source, prefetchingSource != source { restoreDownloadState(for: source) }
+        updateControlButtonStates()
+    }
+
     @objc private func pauseResumeTapped() {
-        guard isPlaybackRunning else { return }
+        guard isPlaybackRunning, isPlaybackStarted || isPlaybackPaused else { return }
 
         if isPlaybackPaused {
             vapView.resume()
@@ -315,20 +381,13 @@ final class ViewController: UIViewController {
     }
 
     @objc private func stopTapped() {
-        vapView.stop()
-        progressBar.isHidden = true
-        isPlaybackRunning = false
-        isPlaybackStarted = false
-        isPlaybackPaused = false
-        updateControlButtonStates()
+        cancelPrefetch()
+        stopPlayback()
         setStatus("Stopped - \(selectedGift?.name ?? "No gift")")
     }
 
     @objc private func clearCacheTapped() {
-        prefetchTask?.cancel()
-        prefetchTask = nil
-        prefetchingSource = nil
-        isPrefetching = false
+        cancelPrefetch()
         progressBar.isHidden = true
         downloadStates.removeAll()
         collectionView.reloadData()
@@ -351,6 +410,10 @@ final class ViewController: UIViewController {
     }
 
     private func startPlay(effect: GiftEffect) {
+        stopPlayback()
+        let id = UUID()
+        playbackID = id
+        playbackSource = effect.url
         print("[VAPDemo] play gift=\(effect.name) alphaPlacement=\(defaultAlphaPlacement)")
         progressBar.isHidden = true
         progressBar.progress = 0
@@ -369,9 +432,9 @@ final class ViewController: UIViewController {
         )
 
         vapView.play(playbackConfiguration, eventHandler: { [weak self] event in
-            DispatchQueue.main.async {
-                self?.handlePlaybackEvent(event, giftName: effect.name, source: effect.url)
-            }
+            // SDK 已在主 Actor 同步交付事件，无需再次入队；消费时仍校验请求身份。
+            guard let self, self.playbackID == id else { return }
+            self.handlePlaybackEvent(event, giftName: effect.name, source: effect.url)
         })
     }
 

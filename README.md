@@ -276,3 +276,16 @@ vapView.resourceLoader = CustomResourceLoader()
 ## License
 
 MIT License. Copyright (C) 2026 astralchen.
+
+### Cancelling prefetch and shared loads
+
+Cancel the Swift `Task` awaiting `prefetch`. The default `VAPDiskCache` tracks each caller independently: cancelling one subscriber promptly throws `CancellationError` while other prefetch/playback subscribers continue. Cancelling the last subscriber cancels the underlying `URLSessionDownloadTask` and waits for its completion and temporary-file cleanup. A new request for that URL waits for the retiring generation before starting fresh.
+
+```swift
+let task = Task { try await VAPView.prefetch(source: url.absoluteString) }
+task.cancel()
+do { _ = try await task.value }
+catch is CancellationError { /* This subscriber has been released. */ }
+```
+
+`stop()` and playback replacement release only that view's subscription. No new progress callback begins after cancellation takes effect; an executing callback is not interrupted. The first selected terminal result wins, so late cancellation does not replace success. Only complete files become cache entries. Pre-cancelled calls also reject local paths and cache hits. Custom `VAPResourceLoader` implementations must cooperate with cancellation themselves.

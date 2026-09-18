@@ -18,12 +18,18 @@ public enum VAPCacheStatus: Equatable, Sendable {
 ///
 /// 默认实现为 `VAPDiskCache.shared`。
 public protocol VAPResourceLoader: AnyObject, Sendable {
-    /// 返回给定 source 对应的本地文件路径。
+    /// 返回指定资源对应的本地文件路径。
+    ///
+    /// 自定义实现应在开始工作和阶段边界协作检查取消。共享加载只解除当前调用
+    /// 的订阅；最后一个订阅取消后，应等待底层工作实际退出及清理，再结束异步调用。
+    /// 取消生效后不得派发新的进度通知；已经进入执行的回调无需强行中断。
+    /// 已确定的成功结果不应被迟到取消改写。
     ///
     /// - Parameters:
     ///   - source: 本地文件路径或远程 `https://` URL 字符串。
     ///   - progressHandler: 在主 actor 上回调下载进度，取值范围为 `0...1`。
     /// - Returns: 可直接用于播放的绝对本地文件路径。
+    /// - Throws: 预取消或加载取消时抛出 `CancellationError`；其他加载错误保留原类型。
     @concurrent func resolveLocalPath(
         for source: String,
         progressHandler: @escaping @MainActor @Sendable (Double) -> Void
@@ -32,7 +38,10 @@ public protocol VAPResourceLoader: AnyObject, Sendable {
 
 /// 为支持状态查询的资源缓存提供统一接口。
 public protocol VAPResourceCacheStatusProviding: AnyObject, Sendable {
-    /// 返回给定 source 当前的缓存/下载状态。
+    /// 查询指定资源当前的缓存或下载状态。
+    ///
+    /// - Parameter source: 要查询的资源来源。
+    /// - Returns: 查询时的状态快照；此方法不触发下载。
     @concurrent func cacheStatus(for source: String) async -> VAPCacheStatus
 }
 
