@@ -111,7 +111,18 @@ private final class ControlledProtocol: URLProtocol, @unchecked Sendable {
         var starts = 0
         var stops = 0
         let payload: Data
-        init(payload: Data) { self.payload = payload }
+        let waitsForResponse: Bool
+        init(payload: Data, waitsForResponse: Bool = false) {
+            self.payload = payload
+            self.waitsForResponse = waitsForResponse
+        }
+        func fail() {
+            queue.async {
+                guard let instance = self.instance else { return }
+                instance.client?.urlProtocol(instance, didFailWithError: URLError(.cannotConnectToHost))
+                self.instance = nil
+            }
+        }
         func finish() {
             queue.async {
                 guard let instance = self.instance else { return }
@@ -140,6 +151,10 @@ private final class ControlledProtocol: URLProtocol, @unchecked Sendable {
         control.queue.sync {
             control.instance = self
             control.starts += 1
+            if control.waitsForResponse {
+                Task { await control.started.open() }
+                return
+            }
             let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil,
                                            headerFields: ["Content-Length": "\(control.payload.count)"])!
             client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
@@ -223,6 +238,81 @@ struct VAPNetworkCancellationTests {
 
 @Suite(.serialized) @MainActor
 struct VAPViewSharedCancellationTests {
+    @Test func uncachedPlaybackReportsZeroBeforeResponseThenFailure() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ControlledProtocol.self]
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = VAPDiskCache(configuration: configuration, cacheDirectory: directory)
+        let control = ControlledProtocol.Control(payload: Data(), waitsForResponse: true)
+        let url = ControlledProtocol.install(control)
+        let view = VAPView()
+        defer { view.stop() }
+        view.resourceLoader = cache
+        var progress: [Double] = []
+        let failed = Gate()
+        view.play(source: url.absoluteString, eventHandler: { event in
+            if case .downloading(let value) = event { progress.append(value) }
+            if case .didFail = event { Task { await failed.open() } }
+        })
+        // 此时服务端未返回响应头或任何数据；仍须已通知下载开始。
+        await control.started.wait()
+        #expect(progress == [0])
+        #expect(await cache.cacheStatus(for: url.absoluteString) == .downloading(progress: 0))
+        control.fail()
+        await failed.wait()
+        #expect(progress == [0], "失败不能误报下载完成")
+    }
+
+    @Test func cacheHitPlaybackDoesNotEmitDownloading() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ControlledProtocol.self]
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = VAPDiskCache(configuration: configuration, cacheDirectory: directory)
+        let control = ControlledProtocol.Control(payload: Data(repeating: 4, count: 4096))
+        let url = ControlledProtocol.install(control)
+        let prefetch = Task { try await VAPView.prefetch(source: url.absoluteString, using: cache) }
+        await control.started.wait()
+        control.finish()
+        _ = try await prefetch.value
+        let view = VAPView()
+        defer { view.stop() }
+        view.resourceLoader = cache
+        var progress: [Double] = []
+        let decoded = Gate()
+        view.play(source: url.absoluteString, eventHandler: { event in
+            if case .downloading(let value) = event { progress.append(value) }
+            // 假视频解析失败代表缓存已经交付播放器。
+            if case .didFail = event { Task { await decoded.open() } }
+        })
+        await decoded.wait()
+        #expect(progress.isEmpty)
+        #expect(control.counts.0 == 1)
+    }
+
+    @Test func cancellingFromInitialProgressPreventsTransportStart() async throws {
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [ControlledProtocol.self]
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let cache = VAPDiskCache(configuration: configuration, cacheDirectory: directory)
+        let control = ControlledProtocol.Control(payload: Data(), waitsForResponse: true)
+        let url = ControlledProtocol.install(control)
+        var cancelDownload: (() -> Void)?
+        let task = Task {
+            try await VAPView.prefetch(source: url.absoluteString, using: cache) { value in
+                #expect(value == 0)
+                // 使用当前订阅的取消句柄，验证回调重入取消后的检查点。
+                cancelDownload?()
+            }
+        }
+        cancelDownload = { task.cancel() }
+        defer { cancelDownload = nil }
+        await #expect(throws: CancellationError.self) { try await task.value }
+        #expect(control.counts.0 == 0)
+    }
+
     @Test(arguments: [true, false])
     func playbackAndPrefetchOwnSeparateSubscriptions(cancelPlayback: Bool) async throws {
         let configuration = URLSessionConfiguration.ephemeral

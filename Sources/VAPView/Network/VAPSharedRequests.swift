@@ -38,6 +38,11 @@ final class VAPSharedRequests<Value: Sendable>: @unchecked Sendable {
     }
     private let lock = NSLock()
     private var entries: [String: Entry] = [:]
+    private let completionProgress: @Sendable (Value) -> Double?
+
+    init(completionProgress: @escaping @Sendable (Value) -> Double? = { _ in 1 }) {
+        self.completionProgress = completionProgress
+    }
 
     /// 订阅指定资源的共享工作，并等待当前订阅的结果。
     ///
@@ -188,7 +193,9 @@ final class VAPSharedRequests<Value: Sendable>: @unchecked Sendable {
     // 终态先于最终进度回调确定，回调中发生的取消不能反向改写已确定的成功。
     private func finish(_ result: Result<Value, Error>, key: String, id: UUID) async {
         for (subscriber, continuation, terminal) in takeCompleted(result, key: key, id: id) {
-            if case .success = terminal { await report(1, to: subscriber, completed: true) }
+            if case .success(let value) = terminal, let progress = completionProgress(value) {
+                await report(progress, to: subscriber, completed: true)
+            }
             continuation.resume(with: terminal)
         }
     }

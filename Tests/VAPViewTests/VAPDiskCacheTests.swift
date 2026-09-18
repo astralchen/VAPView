@@ -180,12 +180,14 @@ struct VAPDiskCacheTests {
 
     // MARK: - 本地路径透传
 
-    @Test func localSourceReturnedUnchanged() async throws {
+    @Test @MainActor func localSourceReturnedUnchanged() async throws {
         let dir = tmpCacheDir()
         let cache = makeMockCache(tmpDir: dir)
         let path = "/local/some/animation.mp4"
-        let result = try await cache.resolveLocalPath(for: path, progressHandler: { _ in })
+        var progress: [Double] = []
+        let result = try await cache.resolveLocalPath(for: path) { progress.append($0) }
         #expect(result == path)
+        #expect(progress.isEmpty)
     }
 
     // MARK: - 无效 URL
@@ -215,7 +217,7 @@ struct VAPDiskCacheTests {
 
     // MARK: - 缓存命中
 
-    @Test func cacheHitReturnsSamePathWithoutRedownload() async throws {
+    @Test @MainActor func cacheHitReturnsSamePathWithoutRedownload() async throws {
         mockShouldFail = false
         mockResponseData = Data("cached content".utf8)
         let dir = tmpCacheDir()
@@ -224,7 +226,9 @@ struct VAPDiskCacheTests {
         let first  = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
         // 替换模拟数据；第二次调用不得再次下载。
         mockResponseData = Data("new data".utf8)
-        let second = try await cache.resolveLocalPath(for: url, progressHandler: { _ in })
+        var progress: [Double] = []
+        let second = try await cache.resolveLocalPath(for: url) { progress.append($0) }
+        #expect(progress.isEmpty)
         #expect(first == second)
         let content = try Data(contentsOf: URL(fileURLWithPath: first))
         #expect(content == Data("cached content".utf8))
@@ -277,8 +281,8 @@ struct VAPDiskCacheTests {
         }
 
         await delayedState.waitUntilStarted()
-        await waitUntil { firstProgress == [0.5] }
-        #expect(firstProgress == [0.5])
+        await waitUntil { firstProgress == [0, 0.5] }
+        #expect(firstProgress == [0, 0.5])
 
         let second = Task {
             try await cache.resolveLocalPath(for: url) { progress in
@@ -314,7 +318,7 @@ struct VAPDiskCacheTests {
         }
 
         await delayedState.waitUntilStarted()
-        await waitUntil { progressValues == [0.5] }
+        await waitUntil { progressValues == [0, 0.5] }
 
         #expect(await cache.cacheStatus(for: url) == .downloading(progress: 0.5))
 

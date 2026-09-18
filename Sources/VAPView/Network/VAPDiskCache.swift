@@ -19,7 +19,13 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning, VA
 
     private let cacheDirectory: URL
     private let sessionManager: VAPDownloadSessionManager
-    private let requests = VAPSharedRequests<String>()
+    private struct ResolvedResource: Sendable {
+        let path: String
+        let downloaded: Bool
+    }
+    private let requests = VAPSharedRequests<ResolvedResource>(completionProgress: {
+        $0.downloaded ? 1 : nil
+    })
 
     /// 使用系统默认网络配置和应用缓存目录创建资源缓存。
     public convenience init() {
@@ -44,6 +50,7 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning, VA
     /// 解析本地资源路径，或下载并缓存远程资源。
     ///
     /// 缓存命中时直接返回已有路径；本地路径原样返回，不在此验证文件是否存在。
+    /// 这两种情况不通知下载进度。确认需要下载后，先通知进度 `0`，再启动网络请求。
     /// 同一实例内的相同远程资源共享下载，但各次调用独立响应取消。
     ///
     /// - Parameters:
@@ -139,7 +146,7 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning, VA
                                       destination: URL,
                                       progressHandler: @escaping VAPResourceProgressHandler) async throws -> String {
         let sessionManager = self.sessionManager
-        return try await requests.value(for: destination.path, progress: { value, isActive in
+        let resource = try await requests.value(for: destination.path, progress: { value, isActive in
             // 切换到主 Actor 期间订阅可能已取消，实际通知前必须再次检查。
             await MainActor.run {
                 guard isActive() else { return }
@@ -147,9 +154,16 @@ public final class VAPDiskCache: VAPResourceLoader, VAPResourceCacheCleaning, VA
             }
         }) { lease, progress in
             try lease.checkCancellation()
-            if FileManager.default.fileExists(atPath: destination.path) { return destination.path }
-            return try await sessionManager.download(url: url, destination: destination, lease: lease, progress: progress)
+            if FileManager.default.fileExists(atPath: destination.path) {
+                return ResolvedResource(path: destination.path, downloaded: false)
+            }
+            // 在共享工作中通知，后加入的订阅者复用当前进度，不会回退到 0。
+            await progress(0)
+            try lease.checkCancellation()
+            let path = try await sessionManager.download(url: url, destination: destination, lease: lease, progress: progress)
+            return ResolvedResource(path: path, downloaded: true)
         }
+        return resource.path
     }
 }
 
